@@ -21,6 +21,7 @@ from plugin.sdk.plugin import (
     lifecycle,
     llm_tool,
     neko_plugin,
+    plugin_entry,
     ui,
 )
 
@@ -338,7 +339,13 @@ class ReuseBeforeBuildPlugin(NekoPluginBase):
 
     # ══════════ UI ══════════
 
-    @ui.action(id="self_check", name="自检规则完整性")
+    @plugin_entry(
+        id="self_check",
+        name="自检规则完整性",
+        description="确认随包规则本体未被改动，并检查本机 gh 是否可用。",
+        input_schema={"type": "object", "properties": {}, "required": []},
+    )
+    @ui.action(id="self_check", label="自检规则完整性", tone="primary", refresh_context=True)
     async def self_check(self, **_):
         """给用户一个可点的自检：确认随包规则没被改动、gh 能用。"""
         if not self._rule_hash:
