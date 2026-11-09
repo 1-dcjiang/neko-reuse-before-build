@@ -29,8 +29,19 @@ class _Config:
 
 
 class _Ctx:
+    """同时满足两种运行环境：
+
+    - 本地桩：直接读 `ctx.config.dump()`；
+    - 市场 CI 的真 SDK：`PluginConfig.dump()` 会把 ctx 包成 SdkContext 再委托
+      `ctx.get_own_config()`，所以这里也实现那个 getter，并返回 `{"config": ...}` 包体。
+    """
+
     def __init__(self, settings=None):
-        self.config = _Config(settings or {})
+        self._settings = dict(settings or {})
+        self.config = _Config(self._settings)
+
+    async def get_own_config(self, timeout=5.0):
+        return {"config": {"settings": dict(self._settings)}}
 
 
 def _load_plugin_module():
