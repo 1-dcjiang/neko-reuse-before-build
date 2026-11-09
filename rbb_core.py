@@ -19,6 +19,7 @@ import os
 import re
 import shutil
 import subprocess
+import tomllib
 from typing import Any
 
 PERMISSIVE = {"mit", "apache-2.0", "bsd-3-clause", "bsd-2-clause", "isc", "mpl-2.0", "0bsd", "unlicense"}
@@ -41,6 +42,60 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SKILL_DIR = os.path.join(HERE, "skills", "reuse-before-build")
 VERIFY_SCRIPT = os.path.join(SKILL_DIR, "scripts", "verify_localized.py")
 SKILL_MD = os.path.join(SKILL_DIR, "SKILL.md")
+PLUGIN_TOML = os.path.join(HERE, "plugin.toml")
+
+# 兜底默认值与 plugin.toml / config.example.toml 保持一致；三处任一被改坏时仍能启动。
+SETTINGS_DEFAULTS: dict[str, Any] = {
+    "enable_github_scan": True,
+    "gh_binary": "gh",
+    "default_stars": 50,
+    "default_limit": 6,
+    "updated_days": 365,
+    "scan_timeout": 30,
+}
+
+
+def manifest_settings(plugin_toml: str = "") -> dict[str, Any]:
+    """读 plugin.toml 里的 [settings] 作为默认值；读不到就返回空表（不抛）。"""
+    path = plugin_toml or PLUGIN_TOML
+    try:
+        with open(path, "rb") as fh:
+            data = tomllib.load(fh)
+    except Exception:
+        return {}
+    section = data.get("settings")
+    return section if isinstance(section, dict) else {}
+
+
+def resolve_settings(section: Any = None, *, plugin_toml: str = "") -> dict[str, Any]:
+    """把「代码兜底 → plugin.toml 默认 → 运行时配置段」三层合并成可用的六个值。
+
+    宿主侧 `self.config.dump()` 不可用时（例如在没有真实 ctx 的测试环境），
+    调用方传 None 即可，这里仍然返回一套可运行的值，不让插件因为读不到配置就启动失败。
+    """
+    merged: dict[str, Any] = dict(SETTINGS_DEFAULTS)
+    merged.update({k: v for k, v in manifest_settings(plugin_toml).items() if k in SETTINGS_DEFAULTS})
+    if isinstance(section, dict):
+        merged.update({k: v for k, v in section.items() if k in SETTINGS_DEFAULTS})
+
+    def _int(key: str, lo: int, hi: int) -> int:
+        try:
+            value = int(merged.get(key))
+        except (TypeError, ValueError):
+            value = int(SETTINGS_DEFAULTS[key])
+        return max(lo, min(hi, value))
+
+    gh_binary = str(merged.get("gh_binary") or "gh").strip() or "gh"
+    enabled = merged.get("enable_github_scan")
+    return {
+        "enable_github_scan": enabled if isinstance(enabled, bool) else bool(enabled),
+        "gh_binary": gh_binary,
+        "default_stars": _int("default_stars", 0, 10_000_000),
+        "default_limit": _int("default_limit", 1, 50),
+        "updated_days": _int("updated_days", 1, 3650),
+        "scan_timeout": _int("scan_timeout", 5, 300),
+    }
+
 
 
 # ────────────────────────── 时间与格式化 ──────────────────────────

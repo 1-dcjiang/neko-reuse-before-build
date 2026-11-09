@@ -78,14 +78,22 @@ class ReuseBeforeBuildPlugin(NekoPluginBase):
         return Ok({"status": "config_updated"})
 
     async def _load_settings(self):
-        cfg = await self.config.dump()
-        settings = cfg.get("settings", {}) if isinstance(cfg, dict) else {}
-        self._enable_scan = bool(settings.get("enable_github_scan", True))
-        self._gh_binary = str(settings.get("gh_binary") or "gh").strip() or "gh"
-        self._stars = max(0, int(settings.get("default_stars", 50) or 50))
-        self._limit = max(1, int(settings.get("default_limit", 6) or 6))
-        self._updated_days = max(1, int(settings.get("updated_days", 365) or 365))
-        self._timeout = max(5, int(settings.get("scan_timeout", 30) or 30))
+        """读运行时配置段；宿主侧拿不到就用 plugin.toml 默认值，绝不让启动失败。"""
+        section: dict = {}
+        try:
+            cfg = await self.config.dump(timeout=5.0)
+            if isinstance(cfg, dict):
+                raw = cfg.get("settings")
+                section = raw if isinstance(raw, dict) else {}
+        except Exception as e:  # 无真实 ctx 或宿主未提供配置读接口时走兜底
+            self.logger.debug("读取 [settings] 失败，回退默认值：%s", e)
+        resolved = rbb_core.resolve_settings(section)
+        self._enable_scan = resolved["enable_github_scan"]
+        self._gh_binary = resolved["gh_binary"]
+        self._stars = resolved["default_stars"]
+        self._limit = resolved["default_limit"]
+        self._updated_days = resolved["updated_days"]
+        self._timeout = resolved["scan_timeout"]
 
     async def _probe_hash(self):
         try:

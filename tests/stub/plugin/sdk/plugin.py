@@ -11,21 +11,54 @@ _TOOL_NAME_OK = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456
 
 
 class SdkError(Exception):
-    pass
+    def __init__(self, message="", *, code=None, details=None):
+        super().__init__(message)
+        self.code = code
+        self.details = details
 
 
-class _Result:
-    def __init__(self, value, ok):
+class Ok:
+    """与真 SDK `plugin.sdk.shared.models.result.Ok` 同形：`.value` + `.is_ok()`。"""
+
+    __slots__ = ("value",)
+
+    def __init__(self, value=None):
         self.value = value
-        self.ok = ok
+
+    def is_ok(self):
+        return True
+
+    def is_err(self):
+        return False
+
+    def unwrap(self):
+        return self.value
+
+    def __repr__(self):
+        return f"Ok({self.value!r})"
 
 
-def Ok(value=None):
-    return _Result(value, True)
+class Err:
+    """与真 SDK `Err` 同形：`.error` + `.is_err()`；构造函数接受异常或任意值。"""
 
+    __slots__ = ("error",)
 
-def Err(error=None):
-    return _Result(error, False)
+    def __init__(self, error=None):
+        self.error = error
+
+    def is_ok(self):
+        return False
+
+    def is_err(self):
+        return True
+
+    def unwrap(self):
+        if isinstance(self.error, BaseException):
+            raise self.error
+        raise SdkError(str(self.error))
+
+    def __repr__(self):
+        return f"Err({self.error!r})"
 
 
 def neko_plugin(cls):

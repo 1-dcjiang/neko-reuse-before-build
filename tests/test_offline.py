@@ -209,5 +209,33 @@ class TestTable(unittest.TestCase):
         self.assertEqual(len(re.findall(r"(?<!\\)\|", lines[2])), 9)
 
 
+class TestSettings(unittest.TestCase):
+    """配置解析是纯函数，宿主读不到配置时也必须给出可运行的一组值。"""
+
+    def test_manifest_defaults_when_section_missing(self):
+        got = rbb_core.resolve_settings(None)
+        self.assertTrue(got["enable_github_scan"])
+        self.assertEqual(got["gh_binary"], "gh")
+        self.assertEqual(got["default_limit"], 6)
+        self.assertEqual(got["scan_timeout"], 30)
+
+    def test_runtime_section_wins_over_defaults(self):
+        got = rbb_core.resolve_settings({"default_stars": 120, "enable_github_scan": False})
+        self.assertEqual(got["default_stars"], 120)
+        self.assertFalse(got["enable_github_scan"])
+
+    def test_bad_values_are_clamped_not_raised(self):
+        got = rbb_core.resolve_settings(
+            {"default_limit": 0, "updated_days": "bad", "scan_timeout": 9999, "gh_binary": "   "})
+        self.assertEqual(got["default_limit"], 1)
+        self.assertEqual(got["updated_days"], rbb_core.SETTINGS_DEFAULTS["updated_days"])
+        self.assertEqual(got["scan_timeout"], 300)
+        self.assertEqual(got["gh_binary"], "gh")
+
+    def test_unknown_keys_are_ignored(self):
+        got = rbb_core.resolve_settings({"something_else": 1})
+        self.assertNotIn("something_else", got)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
