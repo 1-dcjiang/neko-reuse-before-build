@@ -33,18 +33,35 @@ N.E.K.O 里的 AI 接到「帮我做个 X」时，最容易干的事是直接写
 
 ```
 plugin.toml                        清单（id / entry / 设置项 / ui guide）
+config.example.toml                可复制的运行配置示例（可变默认值放这里，不放 plugin.toml）
 __init__.py                        插件类：5 个 @llm_tool + 生命周期 + 自检 action
 rbb_core.py                        宿主无关纯逻辑（检索/格式检查/校验包装），可离线测试
-skills/reuse-before-build/          规则本体（与上游逐字一致）
+skills/reuse-before-build/          规则本体（规则文本与上游逐字一致）
   SKILL.md                         正典，含 RBB:INVARIANTS 冻结块
   localization.contract.json       块标记 + sha256 + 规则条数/锚点 + 声明格式
   references/                      检索手册 / 六维打分 / 贡献协议 / 宿主适配 / 中文完整版
   scripts/repo_scan.py             无宿主时的 CLI 检索（退出码 0/2/3）
   scripts/verify_localized.py      本地化校验器（四道闸）
 tests/test_offline.py              19 条离线自检（不需要 N.E.K.O SDK）
+tests/test_plugin_runtime.py       8 条运行时自检（跑在最小 SDK 桩上）
+tests/test_smoke.py                市场模板要求的清单/入口 smoke test
+.vscode/                           市场模板要求的 settings.json / tasks.json
 docs/guide.md                      插件面板里的使用说明
 .github/workflows/                 managed-template（Verify / Release）
 ```
+
+> 说明：`skills/` 下的**规则文本**与上游逐字一致（sha256 `fa0f991f…bc93`，由 `verify_localized.py` 验证）。两个随包脚本为通过市场 CI 的 ruff 规则做过**纯格式微调**（局部变量重命名、导入方式调整），逻辑与退出码未变。
+
+
+## 市场合规
+
+仓库按 N.E.K.O 市场 CLI 的 `check -r`（严格模式）自查通过所要求的脚手架：
+
+- `plugin.toml` 符合 `[plugin]` 允许键集；`entry` 指向 `plugin.plugins.reuse_before_build`；
+- `config.example.toml` 承接可变默认值（不含 `[plugin]`），消掉「legacy runtime configuration」警告；
+- `tests/test_smoke.py`、`.vscode/settings.json`、`.vscode/tasks.json`、`.gitignore` 齐备；
+- `.github/workflows/{verify,release}.yml` 复用官方 `plugin-market-{verify,release}.yml@main`；
+- 发版 tag 必须与 `[plugin].version` 相同（当前 `0.1.0` → tag `v0.1.0`）。
 
 ## 边界（写在这里，也写进规则里）
 

@@ -1,0 +1,45 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "测试：插件离线自检",
+      "type": "shell",
+      "command": "python -m unittest discover -s tests -v",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "测试：随包 skill（30 条）",
+      "type": "shell",
+      "command": "python -m unittest discover -s tests -v",
+      "options": {
+        "cwd": "${workspaceFolder}/skills/reuse-before-build"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "校验：规则完整性",
+      "type": "shell",
+      "command": "python scripts/verify_localized.py SKILL.md",
+      "options": {
+        "cwd": "${workspaceFolder}/skills/reuse-before-build"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Lint：市场 CI 同参数",
+      "type": "shell",
+      "command": "uvx ruff==0.12.4 check --ignore-noqa --isolated --no-respect-gitignore --target-version py311 --line-length 120 --select E4,E7,E9,F,I .",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    }
+  ]
+}
