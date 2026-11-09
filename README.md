@@ -74,6 +74,16 @@ docs/guide.md                      插件面板里的使用说明
 
 > CI 里只剩两条环境性提示：`plugin source directory does not have its own git repository`（CI 把源目录拷出来构建导致），以及 Node 20 弃用提示（由官方复用工作流的 action 版本决定，非本仓可控）。
 
+## 市场登记（唯一未自动完成的一步）
+
+官方 `neko-plugin publish` 的最后一步是向 `market.project-neko.cn/api/v1/release-publications` POST Release URL。本仓试过，市场回了：
+
+```
+400 {"detail":"GitHub release 未绑定到唯一的已通过插件","code":"release_repo_mismatch"}
+```
+
+意思是仓库还没在市场侧「绑定到插件记录」。这一步要走市场网页的 **Upload plugin → Continue to authorize**，用作者本人的 N.E.K.O 账号授权后才建立绑定；没有账号授权就没法自动完成。绑定后重新 POST 同一个 Release URL 即可（重复提交会重新挂到同一次核验）。
+
 ## 边界（写在这里，也写进规则里）
 
 - **只读**：本插件不创建 issue、不提 PR、不发评论、不推送任何远端变更。公开写一律要用户逐次确认。
