@@ -1,0 +1,341 @@
+#!/usr/bin/env python3
+"""离线 smoke test：不联网也能跑，只依赖标准库。
+
+跑法：
+    python -m unittest discover -s tests -v
+"""
+
+from __future__ import annotations
+
+import contextlib
+import datetime as dt
+import importlib.util
+import io
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+SCRIPT = os.path.join(ROOT, "scripts", "repo_scan.py")
+
+_SPEC = importlib.util.spec_from_file_location("repo_scan", SCRIPT)
+repo_scan = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(repo_scan)
+
+
+def run(args, env=None, timeout=90):
+    return subprocess.run(
+        [sys.executable, "-X", "utf8", SCRIPT, *args],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=timeout,
+        env=env,
+    )
+
+
+class TestHelpers(unittest.TestCase):
+    def test_md_cell_escapes_pipe(self):
+        self.assertEqual(repo_scan.md_cell("a|b"), "a\\|b")
+
+    def test_md_cell_flattens_newlines(self):
+        self.assertEqual(repo_scan.md_cell("a\nb\rc"), "a b c")
+
+    def test_md_cell_empty(self):
+        self.assertEqual(repo_scan.md_cell(None), "-")
+        self.assertEqual(repo_scan.md_cell(""), "-")
+
+    def test_default_since_survives_leap_day(self):
+        # 2028 是闰年；旧实现 replace(year-1) 会 ValueError。减 365 天落到 2027-03-01。
+        self.assertEqual(repo_scan.default_since(dt.date(2028, 2, 29)), "2027-03-01")
+
+    def test_default_since_normal_date(self):
+        self.assertEqual(repo_scan.default_since(dt.date(2026, 11, 9)), "2025-11-09")
+
+    def test_render_table_escapes_every_cell(self):
+        row = {
+            "full_name": "a/b|c", "stargazersCount": 3, "license": {"key": "mit"},
+            "pushedAt": "2026-01-01T00:00:00Z", "language": "Py\nthon",
+            "openIssuesCount": 1, "url": "https://x|y", "matched_keyword": ["k|w"],
+            "_activity": 2, "_lic_label": "MIT",
+        }
+        lines = repo_scan.render_table([row]).splitlines()
+        self.assertEqual(len(lines), 3, "表头 + 分隔行 + 1 行数据")
+        for line in lines:
+            # 未被反斜杠转义的竖线才是列分隔符，必须正好 9 个（8 列）
+            self.assertEqual(len(re.findall(r"(?<!\\)\|", line)), 9, f"列数被破坏：{line}")
+        self.assertIn("a/b\\|c", lines[2])
+
+    def test_render_table_stalled_marker(self):
+        row = {
+            "full_name": "a/b", "stargazersCount": 1, "pushedAt": "2024-01-01T00:00:00Z",
+            "language": "Go", "openIssuesCount": 0, "url": "https://x",
+            "matched_keyword": ["k"], "_activity": 0, "_lic_label": "MIT",
+        }
+        self.assertIn("⚠停滞", repo_scan.render_table([row]))
+
+
+class TestOutputs(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="rbb_test_")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _run_stubbed(self, keywords, extra_args, scan_result):
+        old_argv, old_auth, old_scan = sys.argv, repo_scan.auth_ok, repo_scan.scan
+        try:
+            repo_scan.auth_ok = lambda: (True, "")
+            repo_scan.scan = lambda kw, s, u, lim: scan_result
+            sys.argv = [SCRIPT, *keywords, *extra_args]
+            err, out = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stderr(err), contextlib.redirect_stdout(out):
+                code = repo_scan.main()
+        finally:
+            sys.argv, repo_scan.auth_ok, repo_scan.scan = old_argv, old_auth, old_scan
+        return code, out.getvalue(), err.getvalue()
+
+    def test_md_and_json_out_are_written(self):
+        row = {"full_name": "o/r", "stargazersCount": 9, "pushedAt": "2026-11-01T00:00:00Z",
+               "license": {"key": "mit"}, "language": "Rust", "openIssuesCount": 2,
+               "url": "https://github.com/o/r", "matched_keyword": "kw"}
+        md = os.path.join(self.tmp, "c.md")
+        js = os.path.join(self.tmp, "c.json")
+        code, out, _ = self._run_stubbed(["kw"], ["--md-out", md, "--json-out", js], ([row], True))
+        self.assertEqual(code, 0)
+        self.assertTrue(os.path.exists(md))
+        with open(md, encoding="utf-8") as fh:
+            self.assertIn("o/r", fh.read())
+        with open(js, encoding="utf-8") as fh:
+            data = json.load(fh)
+        self.assertEqual(data[0]["full_name"], "o/r")
+        self.assertIn("_lic_score", data[0])
+
+    def test_no_files_written_on_rc3(self):
+        md = os.path.join(self.tmp, "c.md")
+        js = os.path.join(self.tmp, "c.json")
+        code, _, err = self._run_stubbed(["kw"], ["--md-out", md, "--json-out", js], ([], False))
+        self.assertEqual(code, 3)
+        self.assertFalse(os.path.exists(md))
+        self.assertFalse(os.path.exists(js))
+        self.assertIn("未写出", err)
+
+
+class TestCli(unittest.TestCase):
+    def test_help(self):
+        proc = run(["--help"])
+        self.assertEqual(proc.returncode, 0)
+        for flag in ("--stars", "--updated-since", "--limit", "--md-out", "--json-out"):
+            self.assertIn(flag, proc.stdout)
+
+    def test_missing_keywords(self):
+        proc = run([])
+        self.assertEqual(proc.returncode, 2)
+
+    def test_gh_absent_returns_2(self):
+        gh = shutil.which("gh")
+        if not gh:
+            self.skipTest("本机没有 gh，跳过（该场景已由 test_gh_absent_* 的 PATH 剥离覆盖）")
+        env = dict(os.environ)
+        keep = [p for p in env.get("PATH", "").split(os.pathsep)
+                if p and not os.path.exists(os.path.join(p, "gh.exe")) and not os.path.exists(os.path.join(p, "gh"))]
+        env["PATH"] = os.pathsep.join(keep)
+        proc = run(["x"], env=env)
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("未找到 gh CLI", proc.stderr)
+
+    def test_all_keywords_fail_returns_3(self):
+        """gh 可用但检索全失败（限流/瞬时故障）时必须是 rc=3，不能是 0。
+
+        用打桩代替真联网：auth 通过、每个关键词都返回 ok=False。
+        """
+        import contextlib
+        import io
+
+        old_argv = sys.argv
+        old_auth, old_scan = repo_scan.auth_ok, repo_scan.scan
+        try:
+            repo_scan.auth_ok = lambda: (True, "")
+            repo_scan.scan = lambda kw, s, u, lim: ([], False)
+            sys.argv = [SCRIPT, "obsidian sync plugin"]
+            err, out = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stderr(err), contextlib.redirect_stdout(out):
+                code = repo_scan.main()
+        finally:
+            sys.argv = old_argv
+            repo_scan.auth_ok, repo_scan.scan = old_auth, old_scan
+        self.assertEqual(code, 3)
+        self.assertIn("检索失败 ≠ 没有同类项目", err.getvalue())
+
+    def test_gh_host_unreachable_returns_2(self):
+        """gh 在但连不上主机：属于 gh 不可用，rc=2，且提示里要点明不是'没搜到'。"""
+        if not shutil.which("gh"):
+            self.skipTest("本机没有 gh")
+        env = dict(os.environ)
+        env["GH_HOST"] = "nohost.invalid"
+        proc = run(["obsidian sync plugin"], env=env)
+        self.assertEqual(proc.returncode, 2, msg=proc.stderr[-400:])
+        self.assertIn("gh 无法确认可用", proc.stderr)
+
+
+class TestVerifier(unittest.TestCase):
+    """本地化校验器：必须能抓到"偷偷削规则"，也必须放过合规副本。"""
+
+    VERIFY = os.path.join(ROOT, "scripts", "verify_localized.py")
+    SKILL = os.path.join(ROOT, "SKILL.md")
+    ZH = os.path.join(ROOT, "references", "zh-guide.md")
+    CONTRACT = os.path.join(ROOT, "localization.contract.json")
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="rbb_verify_")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def verify(self, path, *extra):
+        return subprocess.run(
+            [sys.executable, "-X", "utf8", self.VERIFY, path, *extra],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
+        )
+
+    def _copy_with(self, src, mutate=None, append=""):
+        with open(src, encoding="utf-8") as fh:
+            text = fh.read()
+        if mutate:
+            text = mutate(text)
+        text += append
+        dst = os.path.join(self.tmp, os.path.basename(src))
+        with open(dst, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(text)
+        return dst
+
+    def test_canonical_skill_passes_verbatim(self):
+        p = self.verify(self.SKILL, "--canonical")
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn("PASS", p.stdout)
+        self.assertIn("verbatim", p.stdout)
+
+    def test_canonical_zh_passes_as_translated(self):
+        p = self.verify(self.ZH, "--canonical")
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn("translated(zh)", p.stdout)
+
+    def test_contract_hash_matches_skill(self):
+        """改了 SKILL.md 的规则区却忘记更新契约时，这条会先炸。"""
+        with open(self.CONTRACT, encoding="utf-8") as fh:
+            want = json.load(fh)["block"]["canonical_sha256"]
+        p = subprocess.run(
+            [sys.executable, "-X", "utf8", self.VERIFY, "--print-hash", self.SKILL],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
+        )
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(p.stdout.strip(), want)
+
+    def test_removing_the_gate_fails(self):
+        def mutate(text):
+            return "\n".join(line for line in text.splitlines()
+                             if "Not reusable because" not in line)
+
+        p = self.verify(self._copy_with(self.SKILL, mutate, self.DECL))
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("gate", p.stdout)
+
+    def test_editing_inside_block_without_lang_marker_fails(self):
+        def mutate(text):
+            return text.replace("Assume it already exists", "Assume it probably exists", 1)
+
+        p = self.verify(self._copy_with(self.SKILL, mutate, self.DECL))
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("invariants_hash", p.stdout)
+
+    def test_localized_copy_with_declaration_passes(self):
+        line = ("\nlocalized: host=test-host | kept=five rules, gate, verdict order, "
+                "four-part deliverable, hard constraints | changed=none | unsupported=none\n")
+        p = self.verify(self._copy_with(self.SKILL, append=line))
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+
+    def test_localized_copy_without_declaration_fails(self):
+        p = self.verify(self._copy_with(self.SKILL))
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("declaration", p.stdout)
+
+    def test_translated_block_without_lang_marker_fails(self):
+        def mutate(text):
+            return "\n".join(line for line in text.splitlines()
+                             if "RBB:INVARIANTS:LANG:" not in line)
+
+        p = self.verify(self._copy_with(self.ZH, mutate, self.DECL))
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("invariants_hash", p.stdout)
+
+    DECL = ("\nlocalized: host=test | kept=all | changed=packaging | unsupported=none\n")
+
+    def test_deleting_a_rule_fails_in_translated_mode(self):
+        """翻译模式不能靠"只比 6 个锚点"混过删条这一关。"""
+        def mutate(text):
+            return "\n".join(line for line in text.splitlines()
+                             if "默认目标是加入已有公开仓库" not in line)
+
+        p = self.verify(self._copy_with(self.ZH, mutate, self.DECL))
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("rules_count", p.stdout)
+        self.assertIn("rule:rule_2", p.stdout)
+
+    def test_renumbering_fails(self):
+        def mutate(text):
+            return text.replace("4. **贡献必须真的有用", "6. **贡献必须真的有用", 1)
+
+        p = self.verify(self._copy_with(self.ZH, mutate, self.DECL))
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("rules_numbering", p.stdout)
+
+    def test_softening_a_rule_title_fails(self):
+        def mutate(text):
+            return text.replace("贡献必须真的有用", "贡献应当有价值", 1)
+
+        p = self.verify(self._copy_with(self.ZH, mutate, self.DECL))
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("rule:rule_4", p.stdout)
+
+    def test_canonical_is_refused_outside_the_package(self):
+        p = self.verify(self._copy_with(self.SKILL, append=self.DECL), "--canonical")
+        self.assertEqual(p.returncode, 2)
+        self.assertIn("REFUSED", p.stderr)
+
+    def test_footer_after_declaration_still_passes(self):
+        p = self.verify(self._copy_with(self.SKILL, append=self.DECL + "© 2026 someone\n"))
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+
+    def test_marker_fence_demo_before_the_real_block_is_ignored(self):
+        """前面用代码围栏演示一对标记时，不能把示例当真理块。"""
+        demo = "```markdown\n<!-- RBB:INVARIANTS:BEGIN -->\n1. demo rule\n<!-- RBB:INVARIANTS:END -->\n```\n\n"
+        p = self.verify(self._copy_with(self.SKILL, lambda t: demo + t, self.DECL))
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn("verbatim", p.stdout)
+
+    def test_indented_sub_items_are_not_counted_as_rules(self):
+        def mutate(text):
+            return text.replace("4. **贡献必须真的有用",
+                                "4. **贡献必须真的有用**\n   1. 子项甲\n   2. 子项乙", 1)
+
+        p = self.verify(self._copy_with(self.ZH, mutate, self.DECL))
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn("translated(zh)", p.stdout)
+
+    def test_marker_mentioned_in_prose_does_not_shift_the_block(self):
+        """说明文字里提到标记名时，块边界仍按整行锚定，不会切错区间。"""
+        prose = "说明：块用 `<!-- RBB:INVARIANTS:BEGIN -->` 与 `<!-- RBB:INVARIANTS:END -->` 圈住。\n\n"
+        p = self.verify(self._copy_with(self.SKILL, lambda t: prose + t, self.DECL))
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn("verbatim", p.stdout)
+
+
+if __name__ == "__main__":
+    unittest.main()

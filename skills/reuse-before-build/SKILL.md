@@ -1,0 +1,180 @@
+---
+name: reuse-before-build
+license: MIT
+description: Before writing any new program, script, library, plugin or service, search for existing open-source implementations with the same purpose or idea — especially on GitHub — and prefer joining that repository as a public contributor over creating a new one from scratch. Use when the user asks to "build me a tool", "write a script that ...", "create a new app / library / bot / plugin / service", "implement X from scratch", "is there an existing open-source project for this", "contribute to an open-source repo", "upstream this fix", or "open a PR"; also when the user says 帮我写一个…工具、做一个和 X 一样的程序、有没有现成的、从零实现一个…. Skip this skill only when the user requires private or closed-source code, or an existing license forbids redistribution.
+---
+
+# Reuse Before Build
+
+Rules, not a tool. Works in any host that can read files (Claude Skills, AGENTS.md coding agents) and degrades to a paste-in prompt elsewhere — see [references/host-adapters.md](references/host-adapters.md). Chinese edition of this file: [references/zh-guide.md](references/zh-guide.md).
+
+**Contents**: [Core rules](#core-rules) · [Two lanes](#two-lanes) · [Step 1 Discover](#step-1--discover) · [Step 2 Evaluate](#step-2--evaluate) · [Step 3 Contribute](#step-3--contribute) · [Step 4 Deliver](#step-4--deliver)
+[When not to reuse](#when-not-to-reuse) · [Hard constraints](#hard-constraints) · [Hosts](#hosts) · [Self-localization](#self-localization-adapt-the-packaging-never-the-rules) · [Worked examples](#worked-examples)
+
+## Core rules
+
+<!-- RBB:INVARIANTS:BEGIN -->
+1. **Assume it already exists until searching proves otherwise.** Never draft a prototype first and look for references later. Order is always search → evaluate → decide → build.
+2. **The default outcome is joining an existing public repository, not creating a new one.** What the user actually wants is a working, maintained, upgradeable thing — not an orphan one-off. An upstream repo brings tests, issue tracking, release channels and users for free.
+3. **Prove non-reusability before building new.** New code requires a stated reason (license, direction conflict, abandoned upstream with no viable fork, genuinely different requirement) written in the deliverable.
+4. **Contribution must be genuinely useful.** No typo, formatting or untested-duplicate PRs. Those get closed and tag the account as a spammer.
+5. **Code gate: candidates and a first concrete action come before scaffolding.** Do not output a full new-project scaffold before you have listed 3–6 candidates and the first executable contribution action (draft issue text or PR plan).
+   If a matching repo exists and you still choose to build new, the first line of the reply must be `不可复用原因 / Not reusable because: <license | direction | maintenance | requirement mismatch>`.
+<!-- RBB:INVARIANTS:END -->
+
+## Two lanes
+
+| Lane | Trigger | Action | Cost |
+|---|---|---|---|
+| **Quick** | One-off script, single-file tool, throwaway automation | 3 search strings (English feature words + `awesome <domain>` + `<feature> alternative`), read the top 5 results; extend an existing project or cite it; write only if nothing matches | 1–2 min |
+| **Full** | New library / plugin / service / long-lived project, or quick lane found a match | The four steps below + six-dimension scoring + contribution path | 10–30 min |
+
+The quick lane trims scoring and the contribution workflow — never the "has anyone done this" question. Its reply is three lines, not the four-part template:
+
+```
+Reused: <repo> (<license>, <stars>) — <one line on why it fits>
+Change: <what I will do in that repo / what I will call from it>
+Risk: <what breaks if it is wrong>
+```
+
+If nothing matched, say so in one line and name the searches you ran, so the user can see the negative result instead of trusting it.
+
+## Step 1 — Discover
+
+Follow [references/discovery-playbook.md](references/discovery-playbook.md). Three rounds minimum:
+
+- **Round 1, direct**: GitHub repository and code search, with keywords expanded into English synonyms — never only the user's phrasing.
+- **Round 2, ecosystem**: package registries (npm, PyPI, crates.io, Maven, Homebrew), awesome-lists, framework plugin directories, Docker Hub.
+- **Round 3, people**: search the candidates' issues/discussions for the same request; check Stack Overflow, Hacker News, Reddit, V2EX, Zhihu for threads pointing at a repo.
+
+Produce a shortlist of 3–6 repos, each with: full name, stars, last commit, license, what it lacks. **Without network or repo access, do not invent repos** — output a search checklist for the user to run or paste, and say you could not verify.
+
+With an authenticated `gh` CLI, get the shortlist table first:
+
+```bash
+python scripts/repo_scan.py "video highlight clip" "auto cut shorts" --stars 100
+```
+
+It runs `gh search repos` per keyword, dedupes, and flags `no LICENSE` and stalled repos, so you can open the survivors and score them instead of paging through GitHub by hand.
+
+## Step 2 — Evaluate
+
+Score with [references/repo-triage.md](references/repo-triage.md): activity, maintainer responsiveness, license compatibility, contribution friendliness, requirement fit, code quality — 0–2 each.
+
+| Verdict | Condition | Next |
+|---|---|---|
+| **Join** (preferred) | ≥ 8 total, license OK, requirement fits as an incremental feature or fix | Contribution protocol |
+| **Extend** | Core repo won't take it, but a plugin/extension/theme mechanism exists | Ship as an official extension; still joining the ecosystem |
+| **Fork** | Maintainer gone, direction conflict, license allows | Fork, keep syncing upstream, PR the improvement back |
+| **Build** | No equivalent, license forbids it, requirement is fundamentally different | Build new — reason first |
+
+For every rejected candidate, write one line on why you dropped it. Users ask.
+
+## Step 3 — Contribute
+
+Follow the order in [references/contribution-protocol.md](references/contribution-protocol.md):
+
+1. **Read** `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, PR template, commit conventions, CLA/DCO requirements.
+2. **Issue first**: bug fixes may go straight to a PR; features, behaviour changes and refactors need an issue or discussion with a maintainer "yes".
+3. **Small PR**: single purpose, ideally < 300 lines of diff, with tests, docs, changelog, `Signed-off-by` if required.
+4. **Disclose AI assistance**: say what the AI helped with; the author identity is the user's own GitHub account, never someone else's.
+5. **Follow through**: change only what review asked, don't bump naggingly, one polite bump after 7 working days; after merge, watch the release and follow-ups.
+
+If rejected or ignored for long, downgrade to Extend/Fork per the verdict table. Do not reopen the same PR repeatedly.
+
+## Step 4 — Deliver
+
+Every **full-lane** reply must contain all four parts (the quick lane uses the three-line form above):
+
+```markdown
+## What I found
+| Repo | Stars / last commit | License | Gap vs. the request |
+## Why this one
+## What I will add (issue / PR plan)
+- Target files, change scope, test approach, expected diff size
+## Alternatives and risks
+- Fallback if rejected; license and trademark boundaries; maintainer-activity risk
+```
+
+## When not to reuse
+
+Any of these justifies building new, with the reason in the deliverable:
+
+- The user requires private, closed-source, no-upload, internal-company code.
+- The license conflicts with the intended use (closed-source commercial + AGPL, no commercial terms).
+- The repo requires a CLA assigning copyright and the user refuses.
+- Direction is explicitly opposite (the project states it won't do this), or the maintainer has publicly abandoned it with no active fork.
+- Security posture is unacceptable (unmaintained, known critical vulnerabilities, suspicious origin).
+
+## Hard constraints
+
+- **Never invent repos, star counts, commit dates or licenses.** Mark anything unverified as unverified.
+- **Never open a PR without reading CONTRIBUTING**, never bypass the PR template, never force-push to someone else's branch.
+- **Never use "AI generated it" as a reason to merge**, never fire near-identical PRs at many repos at once.
+- **Never paste the user's private code into a public issue or PR.** Minimise and sanitise reproductions.
+- **No public write without per-action confirmation.** Opening an issue, a PR or a comment is public and hard to retract — it is not covered by "the skill told me to contribute". Draft the exact body (and the diff, for a PR) and get the user's explicit go-ahead for that one action, every time. An authenticated `gh` with `repo` scope is not permission.
+- Do not perform irreversible external actions on the user's behalf (publish, merge, release). Hand the diff and description over for confirmation.
+
+## Hosts
+
+Four ways to install, plus per-host rule-file paths and paste-ready prompts (English and Chinese):
+
+| Type | Hosts | Where it goes |
+|---|---|---|
+| Skill directory | Claude / any Agent Skills host | The whole folder in the skills directory |
+| Repo rule file | Codex CLI, Cursor, Copilot, Gemini CLI, Windsurf, Cline, Roo, Kilo, Continue, Aider, OpenHands, Amp, Zed, Junie, Amazon Q, Kiro, Trae, Qoder, Lingma, CodeGeeX, Comate, CodeBuddy | `AGENTS.md` first, then each host's own file |
+| Custom instructions | ChatGPT, Claude.ai, Gemini, Grok, Copilot, Perplexity, Le Chat, DeepSeek, Doubao, Kimi, Qwen, ERNIE, Yuanbao, Zhipu, Spark, MiniMax | The condensed prompt |
+| Self-hosted agents | LangChain, LlamaIndex, CrewAI, AutoGen, Dify, Coze, n8n | First block of the system prompt + tool notes |
+
+See [references/host-adapters.md](references/host-adapters.md) for the full matrix and the exact rule-file name per host.
+
+## Self-localization: adapt the packaging, never the rules
+
+A host may expect a different shape than this file ships in — another frontmatter schema, a single flat system prompt, a JSON tool definition, a different language, a plugin manifest, a shorter context budget. Adapt the packaging on first use; do not adapt the rules.
+
+**Invariants — reproduce them exactly, whatever the container:** the block between
+`<!-- RBB:INVARIANTS:BEGIN -->` and `<!-- RBB:INVARIANTS:END -->` is the canonical text, and
+`localization.contract.json` stores its SHA-256. Copy that block verbatim (hash matches →
+`verbatim` mode); if the host needs another language, keep the block delimited and add
+`<!-- RBB:INVARIANTS:LANG: <code> -->` as its first inner line (hash will not match →
+`translated` mode, judged on the semantic anchors instead). Never renumber, merge or drop a rule.
+
+- The five core rules, including the code gate and the `不可复用原因 / Not reusable because:` line.
+- Verdict order: Join → Extend → Fork → Build; Build only with a stated reason.
+- The four-part deliverable (found / why / what I will add / alternatives and risks).
+- The quick-lane three-line form (`Reused` / `Change` / `Risk`) whenever the quick lane is used.
+- The hard constraints, especially: never invent repos, stars or licenses; never PR without reading CONTRIBUTING; never paste private code in public.
+
+**Free to change — these are formatting, not meaning:**
+
+- Frontmatter keys and order: fill whatever the host requires (`name` / `description`, `title` / `when_to_use`, `tools`, `version`), and drop keys the host rejects.
+- File layout and names: one flat prompt, `rules/reuse.md`, a plugin manifest entry, or a memory block. Merge or split `references/` as the host's loading model requires.
+- How references resolve: rewrite relative paths to the host's own resource syntax, or inline the referenced sections when the host cannot open files.
+- Language: translate into the host's working language while keeping the gate sentence in both languages, so a bilingual user still recognises it.
+- Tool bindings: `gh` CLI ↔ the host's GitHub tool/MCP ↔ plain `web_search`; state which one this host actually has.
+- Compression: condensed, full, or sectioned — but never below the invariants.
+
+**Procedure, once per host:**
+
+1. **Detect** — read the host's own docs, or two of its existing skills, and list its conventions: frontmatter fields, file layout, how resources are loaded, context budget, available tools, output language.
+2. **Map** — write a short table: this skill's shape → this host's shape, one row per element you will touch.
+3. **Rewrite** — emit the localized copy. Keep the original untouched if the host allows side-by-side files, so the user can diff.
+4. **Verify** — run `python scripts/verify_localized.py <localized-copy>`. It must print `PASS`.
+   If it fails, fix the copy and run it again; if an item genuinely cannot survive (no file access,
+   no tools), mark it explicitly as `unsupported on this host` in the declaration and follow the
+   degradation table in host-adapters — never delete it silently. The checker is outside the model
+   on purpose: your own claim that you kept the rules is not evidence.
+5. **Declare** — the last non-empty line of the file, outside any code fence (a trailing copyright or
+   generation-time footer is tolerated), and the last line of your reply, must be:
+
+```
+localized: host=<name> | kept=<invariants reproduced> | changed=<packaging> | unsupported=<items + reason, or none>
+```
+
+Without that line, and without a `PASS`, the copy is not finished — and it is not "the same skill".
+
+Localization is a last-mile packaging step, not permission to rewrite the procedure. If a host's conventions force a real semantic change, say so and ask — do not ship a quietly weakened version.
+
+## Worked examples
+
+Join / Extend / Fork / Build, each with the deliverable it produces, plus one counter-example: [references/worked-examples.md](references/worked-examples.md). Match the closest case; do not invent a fifth verdict.
