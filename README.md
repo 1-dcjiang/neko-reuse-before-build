@@ -34,17 +34,18 @@ N.E.K.O 里的 AI 接到「帮我做个 X」时，最容易干的事是直接写
 ```
 plugin.toml                        清单（id / entry / 设置项 / ui guide）
 config.example.toml                可复制的运行配置示例（可变默认值放这里，不放 plugin.toml）
+pyproject.toml                     最小工程声明（市场 CLI 的可选件，补上可消掉一条警告）
 __init__.py                        插件类：5 个 @llm_tool + 生命周期 + 自检 action
-rbb_core.py                        宿主无关纯逻辑（检索/格式检查/校验包装），可离线测试
+rbb_core.py                        宿主无关纯逻辑（检索/格式检查/配置解析/校验包装），可离线测试
 skills/reuse-before-build/          规则本体（规则文本与上游逐字一致）
   SKILL.md                         正典，含 RBB:INVARIANTS 冻结块
   localization.contract.json       块标记 + sha256 + 规则条数/锚点 + 声明格式
   references/                      检索手册 / 六维打分 / 贡献协议 / 宿主适配 / 中文完整版
   scripts/repo_scan.py             无宿主时的 CLI 检索（退出码 0/2/3）
   scripts/verify_localized.py      本地化校验器（四道闸）
-tests/test_offline.py              19 条离线自检（不需要 N.E.K.O SDK）
-tests/test_plugin_runtime.py       8 条运行时自检（跑在最小 SDK 桩上）
-tests/test_smoke.py                市场模板要求的清单/入口 smoke test
+tests/test_offline.py              23 条离线自检（不需要 N.E.K.O SDK）
+tests/test_plugin_runtime.py       9 条运行时自检（跑在最小 SDK 桩上）
+tests/test_smoke.py                市场模板要求的清单/入口 smoke test（函数式，pytest 收集 3 条）
 .vscode/                           市场模板要求的 settings.json / tasks.json
 docs/guide.md                      插件面板里的使用说明
 .github/workflows/                 managed-template（Verify / Release）
@@ -59,9 +60,19 @@ docs/guide.md                      插件面板里的使用说明
 
 - `plugin.toml` 符合 `[plugin]` 允许键集；`entry` 指向 `plugin.plugins.reuse_before_build`；
 - `config.example.toml` 承接可变默认值（不含 `[plugin]`），消掉「legacy runtime configuration」警告；
-- `tests/test_smoke.py`、`.vscode/settings.json`、`.vscode/tasks.json`、`.gitignore` 齐备；
+- `tests/test_smoke.py`、`.vscode/settings.json`、`.vscode/tasks.json`、`pyproject.toml`、`.gitignore` 齐备；
 - `.github/workflows/{verify,release}.yml` 复用官方 `plugin-market-{verify,release}.yml@main`；
-- 发版 tag 必须与 `[plugin].version` 相同（当前 `0.1.0` → tag `v0.1.0`）。
+- 发版 tag 必须与 `[plugin].version` 相同（当前 `0.1.1` → tag `v0.1.1`）。
+
+## 验过什么
+
+跑的是官方 `plugin-market-verify.yml` / `plugin-market-release.yml`（不是本地模拟）：
+
+- **Verify**（push 与 tag 各一次）：ruff（`E4,E7,E9,F,I` / py311 / 120 列）→ `sync --clean` → `check --release` → `pytest`（35 项：本仓 32 + 随包 skill 3 条 smoke）→ 打包并校验「包里恰好一个 `manifest.toml`」→ 生成 `market-evidence.json`。
+- **Release**：`v0.1.0` 资产已产出 `reuse_before_build.neko-plugin`（80,309 字节 / sha256 `db86552d…ee58` / payload_hash `c889663d…1843`），`market-evidence.json` 记录 `payload_hash_verified=true`、`tests=passed`、版本与 tag 一致。
+- **本地**：32 项 `unittest`（离线 + SDK 桩）、随包 skill 30 项、`verify_localized.py` 输出 `PASS verbatim rules=[1,2,3,4,5]/5`。
+
+> CI 里只剩两条环境性提示：`plugin source directory does not have its own git repository`（CI 把源目录拷出来构建导致），以及 Node 20 弃用提示（由官方复用工作流的 action 版本决定，非本仓可控）。
 
 ## 边界（写在这里，也写进规则里）
 
