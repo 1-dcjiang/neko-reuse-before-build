@@ -69,7 +69,7 @@ docs/guide.md                      插件面板里的使用说明
 跑的是官方 `plugin-market-verify.yml` / `plugin-market-release.yml`（不是本地模拟）：
 
 - **Verify**（push 与 tag 各一次）：ruff（`E4,E7,E9,F,I` / py311 / 120 列）→ `sync --clean` → `check --release` → `pytest`（35 项：本仓 32 + 随包 skill 3 条 smoke）→ 打包并校验「包里恰好一个 `manifest.toml`」→ 生成 `market-evidence.json`。
-- **Release**：`v0.1.0` 资产已产出 `reuse_before_build.neko-plugin`（80,309 字节 / sha256 `db86552d…ee58` / payload_hash `c889663d…1843`），`market-evidence.json` 记录 `payload_hash_verified=true`、`tests=passed`、版本与 tag 一致。
+- **Release**：`v0.1.1` 资产已产出 `reuse_before_build.neko-plugin`（81,181 字节 / sha256 `955425…5578` / payload_hash `8cc6d1…4ba1`），`market-evidence.json` 记录 `payload_hash_verified=true`、`tests=passed`、版本与 tag 一致（`source_commit` = `b803594`，`neko_commit` = `09e5160`）。
 - **本地**：32 项 `unittest`（离线 + SDK 桩）、随包 skill 30 项、`verify_localized.py` 输出 `PASS verbatim rules=[1,2,3,4,5]/5`。
 
 > CI 里只剩两条环境性提示：`plugin source directory does not have its own git repository`（CI 把源目录拷出来构建导致），以及 Node 20 弃用提示（由官方复用工作流的 action 版本决定，非本仓可控）。
