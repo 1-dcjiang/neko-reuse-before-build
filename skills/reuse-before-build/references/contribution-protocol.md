@@ -38,23 +38,35 @@ gh issue list -R <owner>/<repo> --search "<关键词>" --state all --limit 20
 
 等维护者表态。**不要**在等回复期间就开始大改，也不要反复 @ 人。
 
-### 2. 分支与提交
+### 2. 分支纪律：先分支，不直接写主干
+
+**默认动作永远是从默认分支的最新提交切一条短生命周期分支，所有改动只落在分支上，通过 PR 合入。**
 
 ```bash
 gh repo fork <owner>/<repo> --clone --remote
 cd <repo>
-git switch -c fix/<短描述>
+git fetch upstream            # 没有 upstream 时用 origin
+git switch -c feat/<短描述> upstream/main   # 或仓库实际的默认分支名
 ```
 
-- 一个分支只做一件事；大功能拆成多个 PR（第 1 个 PR 通常是骨架+测试，第 2 个才是实现）。
+- **禁止直接向 `main` / `master` / 仓库默认分支提交或推送**，即使你有写权限；也不要用 GitHub 网页直接编辑主干文件。有权限 ≠ 应该直推。
+- **“主干有可优化的地方”不是直推主干的许可证**：修主干的 bug、重构、补测试、更新文档，改的对象确实是主干的文件，但**照样走分支 + PR**，让 CI 和 review 先把关。
+- 用户自己的仓库同样适用：先分支、CI 绿、再合并；合并与发布属于不可逆外部动作，按硬约束交给用户确认。
+- 分支命名按仓库惯例（`feat/`、`fix/`、`refactor/`、`docs/`），一个分支只做一件事；大功能拆成多个 PR（第 1 个 PR 通常是骨架+测试，第 2 个才是实现）。
 - commit 用仓库既有风格（Conventional Commits 居多）；DCO 仓库加 `-s`。
 - 不 force-push 别人的分支，不在 PR 里重排格式化整个文件（会把 diff 撑爆）。
+- 推送的是**分支**，不是主干：`git push -u origin feat/<短描述>`，然后用 `gh pr create` 开 PR。
+
+### 2.5 接入方式：薄适配层
+
+要调用上游能力（而不是只改上游代码）时，按 [integration-seam.md](integration-seam.md) 执行：选上游承诺稳定的接入口（插件机制 > 公开 API > CLI/配置 > 事件），把所有上游调用收进一个 ≤150 行的适配层，业务代码不直接 import 上游内部。PR 里若包含适配层，附契约测试。
 
 ### 3. 自检（提交前）
 
 - 跑仓库自己的测试/lint/类型检查，命令从 `CONTRIBUTING` 或 `package.json` / `Makefile` / `pyproject.toml` 取，不要自创。
 - **新增行为必须有测试**；bug 修复优先"先写一个复现该 bug 的失败测试，再修"。
 - 更新 `CHANGELOG`（若仓库有）、更新文档/示例（若行为对用户可见）。
+- 若接入了上游能力：业务代码不直接 import 上游内部路径，适配层契约测试通过（见 [integration-seam.md](integration-seam.md) 的验收四条）。
 - diff 自查：`git diff --stat` 与 `git diff` 通读一遍，删掉调试代码、注释掉的旧实现、无关格式化。
 
 ### 4. PR 描述模板

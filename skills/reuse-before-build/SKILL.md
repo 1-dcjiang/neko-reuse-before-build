@@ -1,7 +1,7 @@
 ---
 name: reuse-before-build
 license: MIT
-description: Before writing any new program, script, library, plugin or service, search for existing open-source implementations with the same purpose or idea — especially on GitHub — and prefer joining that repository as a public contributor over creating a new one from scratch. Use when the user asks to "build me a tool", "write a script that ...", "create a new app / library / bot / plugin / service", "implement X from scratch", "is there an existing open-source project for this", "contribute to an open-source repo", "upstream this fix", or "open a PR"; also when the user says 帮我写一个…工具、做一个和 X 一样的程序、有没有现成的、从零实现一个…. Skip this skill only when the user requires private or closed-source code, or an existing license forbids redistribution.
+description: 用户说“帮我写一个…工具/脚本/插件/服务”“做一个和 X 一样的程序”“有没有现成的开源项目”“从零实现一个”，或说 upstream this fix、提 PR 时使用：先检索 GitHub 与包生态里已有同用途实现，按活跃度、许可、贡献友好度评估，优先加入该仓库当公共贡献者，而不是新建更差的重复品。只有要私有/闭源代码、许可禁止再分发时才跳过。Before writing any new program, script, library, plugin or service, search GitHub for an existing implementation and contribute upstream instead of shipping a duplicate, e.g. “build me a tool”, “write a script that…”, “is there an existing project for this”, “implement X from scratch”, “open a PR”.
 ---
 
 # Reuse Before Build
@@ -61,12 +61,14 @@ It runs `gh search repos` per keyword, dedupes, and flags `no LICENSE` and stall
 
 Score with [references/repo-triage.md](references/repo-triage.md): activity, maintainer responsiveness, license compatibility, contribution friendliness, requirement fit, code quality — 0–2 each.
 
+**Modifiability gate, before any Join verdict.** Stars and activity say nothing about whether the code is worth building on. Run the spaghetti check in repo-triage and land on one of three grades: **green** (clean core, tests — prefer *optimising upstream* over writing your own version), **yellow** (stable interface, messy internals — Extend only, through a thin adapter, never touch the core), **red** (god files, global state, cycles, no tests — **do not Join**, even if the total score is ≥ 8; Fork or Build with `不可复用原因 / Not reusable because: code modifiability`). A green repo with a fitting direction means your default job is to make *that repo* better — feature PR, plus a separate small refactor PR if useful — never a same-purpose rewrite just because you would write it prettier.
+
 | Verdict | Condition | Next |
 |---|---|---|
-| **Join** (preferred) | ≥ 8 total, license OK, requirement fits as an incremental feature or fix | Contribution protocol |
-| **Extend** | Core repo won't take it, but a plugin/extension/theme mechanism exists | Ship as an official extension; still joining the ecosystem |
-| **Fork** | Maintainer gone, direction conflict, license allows | Fork, keep syncing upstream, PR the improvement back |
-| **Build** | No equivalent, license forbids it, requirement is fundamentally different | Build new — reason first |
+| **Join** (preferred) | ≥ 8 total, license OK, requirement fits as an incremental feature or fix, modifiability green or yellow | Contribution protocol |
+| **Extend** | Core repo won't take it, a plugin/extension/theme mechanism exists, **or modifiability is yellow** | Ship as an official extension behind a stable seam; still joining the ecosystem |
+| **Fork** | Maintainer gone, direction conflict, **or modifiability is red** while license allows | Fork, keep syncing upstream, PR the improvement back |
+| **Build** | No equivalent, license forbids it, requirement is fundamentally different, or every candidate is red | Build new — reason first |
 
 For every rejected candidate, write one line on why you dropped it. Users ask.
 
@@ -76,9 +78,11 @@ Follow the order in [references/contribution-protocol.md](references/contributio
 
 1. **Read** `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, PR template, commit conventions, CLA/DCO requirements.
 2. **Issue first**: bug fixes may go straight to a PR; features, behaviour changes and refactors need an issue or discussion with a maintainer "yes".
-3. **Small PR**: single purpose, ideally < 300 lines of diff, with tests, docs, changelog, `Signed-off-by` if required.
-4. **Disclose AI assistance**: say what the AI helped with; the author identity is the user's own GitHub account, never someone else's.
-5. **Follow through**: change only what review asked, don't bump naggingly, one polite bump after 7 working days; after merge, watch the release and follow-ups.
+3. **Branch first, never the default branch**: cut `feat|fix|refactor/<short>` from the freshest default-branch commit and push *that branch*, then open a PR. Do not commit or push directly to `main`/`master`, even on repos you own, and do not edit the default branch through the GitHub web UI. "The main branch itself has something worth optimising" changes *which files* you touch, never *this rule* — those fixes also arrive as a branch + PR, so CI and review see them first.
+4. **Integrate through a stable seam and a thin adapter**: when you call upstream rather than patch it, pick the seam upstream promises to keep (plugin/hook API > public semver API > CLI/config/HTTP > events; never private functions or monkey-patches as a delivered solution) and route every upstream call through one adapter module of roughly ≤ 150 lines that only translates, with contract tests. Business code imports the adapter, never upstream internals. See [references/integration-seam.md](references/integration-seam.md).
+5. **Small PR**: single purpose, ideally < 300 lines of diff, with tests, docs, changelog, `Signed-off-by` if required.
+6. **Disclose AI assistance**: say what the AI helped with; the author identity is the user's own GitHub account, never someone else's.
+7. **Follow through**: change only what review asked, don't bump naggingly, one polite bump after 7 working days; after merge, watch the release and follow-ups.
 
 If rejected or ignored for long, downgrade to Extend/Fork per the verdict table. Do not reopen the same PR repeatedly.
 
@@ -92,6 +96,7 @@ Every **full-lane** reply must contain all four parts (the quick lane uses the t
 ## Why this one
 ## What I will add (issue / PR plan)
 - Target files, change scope, test approach, expected diff size
+- Modifiability grade (green / yellow / red) with the evidence; the branch you will push; if calling upstream: seam tier, adapter file, contract-test command
 ## Alternatives and risks
 - Fallback if rejected; license and trademark boundaries; maintainer-activity risk
 ```
@@ -110,6 +115,9 @@ Any of these justifies building new, with the reason in the deliverable:
 
 - **Never invent repos, star counts, commit dates or licenses.** Mark anything unverified as unverified.
 - **Never open a PR without reading CONTRIBUTING**, never bypass the PR template, never force-push to someone else's branch.
+- **Never commit or push directly to the default branch** (`main`/`master`), including your own repositories and including "just a small fix" — branch + PR is the only path; optimising main is a reason to touch its files, not to bypass the branch.
+- **Never let business code import upstream internals**, and never deliver monkey-patching or edited `node_modules`/`site-packages` as the integration. One thin adapter behind a stable seam, with contract tests, or it is not integrated yet.
+- **Never Join a repo whose modifiability you graded red.** Reuse its interface and ecosystem instead (Extend/Fork), or state why you build new.
 - **Never use "AI generated it" as a reason to merge**, never fire near-identical PRs at many repos at once.
 - **Never paste the user's private code into a public issue or PR.** Minimise and sanitise reproductions.
 - **No public write without per-action confirmation.** Opening an issue, a PR or a comment is public and hard to retract — it is not covered by "the skill told me to contribute". Draft the exact body (and the diff, for a PR) and get the user's explicit go-ahead for that one action, every time. An authenticated `gh` with `repo` scope is not permission.
@@ -143,7 +151,7 @@ A host may expect a different shape than this file ships in — another frontmat
 - Verdict order: Join → Extend → Fork → Build; Build only with a stated reason.
 - The four-part deliverable (found / why / what I will add / alternatives and risks).
 - The quick-lane three-line form (`Reused` / `Change` / `Risk`) whenever the quick lane is used.
-- The hard constraints, especially: never invent repos, stars or licenses; never PR without reading CONTRIBUTING; never paste private code in public.
+- The hard constraints, especially: never invent repos, stars or licenses; never PR without reading CONTRIBUTING; never paste private code in public; branch first and never push to the default branch; integrate through a stable seam behind one thin adapter; never Join a red-modifiability repo.
 
 **Free to change — these are formatting, not meaning:**
 

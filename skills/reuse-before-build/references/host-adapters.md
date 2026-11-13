@@ -6,16 +6,38 @@
 
 ## 目录
 
-[四类落位](#先认清四类落位) · [规则文件对照](#b-类规则文件对照) · [聊天平台入口](#c-类聊天平台落位) · [字数预算](#字数预算建议) · [中英提示](#精简版中文约-300-字可直接粘贴) · [硬门禁](#严格版补充团队自动化代理用) · [能力受限](#能力受限时)
+[四类落位](#先认清四类落位) · [dsh 落位](#a-类补充deepseek-harnessdsh) · [规则文件对照](#b-类规则文件对照) · [聊天平台入口](#c-类聊天平台落位) · [字数预算](#字数预算建议) · [中英提示](#精简版中文约-300-字可直接粘贴) · [硬门禁](#严格版补充团队自动化代理用) · [能力受限](#能力受限时)
 
 ## 先认清四类落位
 
 | 类型 | 典型宿主 | 怎么装 |
 |---|---|---|
-| **A. Skill 目录**（能读多文件的 Agent） | Claude（Skills / Claude Code）、支持 Agent Skills 规范的宿主 | 整个 `reuse-before-build/` 目录放进 Skills 目录，自动读 `SKILL.md` 与按需读 `references/` |
+| **A. Skill 目录**（能读多文件的 Agent） | Claude（Skills / Claude Code）、DeepSeek Harness（`dsh`）、支持 Agent Skills 规范的宿主 | 整个 `reuse-before-build/` 目录放进 Skills 目录，自动读 `SKILL.md` 与按需读 `references/` |
 | **B. 仓库规则文件**（编码代理，读项目内约定文件） | Codex CLI、Cursor、Copilot、Gemini CLI、Windsurf、Cline、Aider、OpenHands、Trae、Qoder、Kiro、JetBrains Junie | 把「严格版」写进仓库根的 `AGENTS.md`（通用标准），或对应宿主的规则文件 |
 | **C. 聊天自定义指令**（对话式 AI，只有提示词框） | ChatGPT、Claude.ai、Gemini、Grok、Copilot Chat、Perplexity、Le Chat、豆包、DeepSeek、Kimi、通义、文心、元宝、智谱、星火、MiniMax | 粘贴「精简版」到自定义指令/系统提示；完整版可作为知识文件或项目说明上传 |
 | **D. 自建 Agent 系统提示** | LangChain / LlamaIndex / CrewAI / AutoGen / Dify / Coze / n8n / 自研 Agent | 放在 system prompt 第一段，并在工具说明里给出 `search` / `fetch` / `gh` 能力 |
+
+## A 类补充：DeepSeek Harness（`dsh`）
+
+`dsh`（DeepSeek Harness）自带 `@deepseek-ai/dsh-skill-filesystem`，按 Agent Skills 格式扫描本地目录，所以本 skill 不用改包装，整目录拷进去即可。核对于 `0.2.2-rc.1`。
+
+| rank | 来源 | 路径 |
+|---|---|---|
+| 100 | 项目 `.dsh` | `<项目根>/.dsh/skills` |
+| 200 | 项目 `.agents` | `<项目根>/.agents/skills` |
+| 300 | 自定义 | 插件配置里的 `customSkillDirs` |
+| 400 | 用户 `dsh` | `$DSH_HOME/skills`（默认 `~/.dsh/skills`，跳过 `.system`） |
+| 500 | 用户 `agents` | `$DSH_AGENTS_HOME/skills`（默认 `~/.agents/skills`，与 Codex 共用） |
+
+三条与其它宿主不同的约束：
+
+- **发现深度只有一层**：只认 `<根>/<名字>/SKILL.md` 和扁平的 `<根>/<名字>.md`，不递归。要保留 `references/`、`scripts/` 就必须用目录包，别压成单文件。
+- **目录描述上限 500 字符**（`DEFAULT_CATALOG_DESCRIPTION_MAX_LENGTH`）：超出部分在渲染给模型时被截掉，写在 500 之后的触发词等于不存在。本 skill 的 `description` 因此压到 475 字符，中文触发词放最前面。
+- **frontmatter 只读 `name`、`description`、`whenToUse`、`metadata`、`invocation`**：`license` 这类多余键会被解析后忽略，不会导致整份 skill 被丢弃；`name` 必须是 kebab-case，`modelInvocable` 默认开，用户也能用 `/<名字>` 手动点名。
+
+`name` 或调用值写错、frontmatter 缺失的文件会被静默跳过（只在日志里留一条警告），模型侧看不出区别——装完不生效时先查这三项。
+
+
 
 ## B 类：规则文件对照
 

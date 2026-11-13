@@ -10,6 +10,14 @@ N.E.K.O 里的 AI 接到「帮我做个 X」时，最容易干的事是直接写
 
 规则本体不是插件作者的一句话，而是随包冻结的一段文本：带 `<!-- RBB:INVARIANTS -->` 标记和 sha256。删条、改编号、丢门禁会被随包校验器当场报错——对 AI，也对维护这个插件的人。
 
+## v0.2.0 新增（同步上游 v1.1.0）
+
+- **可改性硬闸**：Join 之前先判屎山——绿（优先优化上游）/ 黄（只 Extend，隔适配层不碰内核）/ 红（**总分 ≥ 8 也不许 Join**，走 Fork/Build 并写 `不可复用原因：代码可改性`），附 7 步证据化检测（`references/repo-triage.md`）。
+- **稳定接入口 + 薄适配层**：新增 `references/integration-seam.md`——接入口按稳定性排序（插件/钩子 > 公开 API > CLI/配置 > 事件，私有函数与 monkey-patch 不作交付），所有上游调用收进一个约 ≤150 行只做翻译的适配层，配契约测试与四条验收。
+- **分支纪律**：禁止直推 `main`/`master`（自己的仓库也一样）；「主干有可优化的地方」只改变动哪些文件，不改这条规则，修主干同样走分支 + PR。
+
+三条都在不变块**之外**，五条核心规则与块哈希（`fa0f991f…bc93`）不变。
+
 ## 五个工具
 
 | 工具 | 何时被调 | 返回 |
@@ -40,7 +48,7 @@ rbb_core.py                        宿主无关纯逻辑（检索/格式检查/�
 skills/reuse-before-build/          规则本体（规则文本与上游逐字一致）
   SKILL.md                         正典，含 RBB:INVARIANTS 冻结块
   localization.contract.json       块标记 + sha256 + 规则条数/锚点 + 声明格式
-  references/                      检索手册 / 六维打分 / 贡献协议 / 宿主适配 / 中文完整版
+  references/                      检索手册 / 六维打分+可改性硬闸 / 贡献协议+分支纪律 / 接入口与薄适配层 / 宿主适配 / 中文完整版
   scripts/repo_scan.py             无宿主时的 CLI 检索（退出码 0/2/3）
   scripts/verify_localized.py      本地化校验器（四道闸）
 tests/test_offline.py              23 条离线自检（不需要 N.E.K.O SDK）
@@ -62,11 +70,16 @@ docs/guide.md                      插件面板里的使用说明
 - `config.example.toml` 承接可变默认值（不含 `[plugin]`），消掉「legacy runtime configuration」警告；
 - `tests/test_smoke.py`、`.vscode/settings.json`、`.vscode/tasks.json`、`pyproject.toml`、`.gitignore` 齐备；
 - `.github/workflows/{verify,release}.yml` 复用官方 `plugin-market-{verify,release}.yml@main`；
-- 发版 tag 必须与 `[plugin].version` 相同（当前 `0.1.1` → tag `v0.1.1`）。
+- 发版 tag 必须与 `[plugin].version` 相同（当前 `0.2.0` → tag `v0.2.0`）。
 
 ## 验过什么
 
-跑的是官方 `plugin-market-verify.yml` / `plugin-market-release.yml`（不是本地模拟）：
+本版（v0.2.0）：
+
+- **本地**：32 项 `unittest`（离线 + SDK 桩）、随包 skill **34** 项（新增 4 条文档级回归：可改性硬闸 / 适配层链接 / 分支纪律 / 不 Join 红与不 import 上游内部）、双正典 `verify_localized.py` 均 `PASS`（`SKILL.md` verbatim、`zh-guide.md` translated(zh)）。
+- **CI**：Verify / Release 的证据见本版 Release 的 `market-evidence.json`。
+
+v0.1.1 的历史记录（跑的是官方 `plugin-market-verify.yml` / `plugin-market-release.yml`，不是本地模拟）：
 
 - **Verify**（push 与 tag 各一次）：ruff（`E4,E7,E9,F,I` / py311 / 120 列）→ `sync --clean` → `check --release` → `pytest`（35 项：本仓 32 + 随包 skill 3 条 smoke）→ 打包并校验「包里恰好一个 `manifest.toml`」→ 生成 `market-evidence.json`。
 - **Release**：`v0.1.1` 资产已产出 `reuse_before_build.neko-plugin`（81,181 字节 / sha256 `955425…5578` / payload_hash `8cc6d1…4ba1`），`market-evidence.json` 记录 `payload_hash_verified=true`、`tests=passed`、版本与 tag 一致（`source_commit` = `b803594`，`neko_commit` = `09e5160`）。
