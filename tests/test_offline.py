@@ -10,7 +10,6 @@ import importlib.util
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -175,37 +174,22 @@ class TestSearchWrapper(unittest.TestCase):
         self.assertEqual(rbb_core.license_flags(rows[1]["license"])[0], 0)
 
     def test_scan_one_end_to_end_with_fake_gh(self):
-        """真跑 subprocess：假 gh 回放录好的 JSON，并记录 argv 验证 `--` 位置。"""
-        tmp = tempfile.mkdtemp(prefix="rbb_fakegh_")
-        self.addCleanup(shutil.rmtree, tmp, True)
-        shutil.copy2(os.path.join(ROOT, "tests", "fixtures", "gh_search_repos.json"),
-                     os.path.join(tmp, "gh_search_repos.json"))
-        script = os.path.join(tmp, "fake_gh.py")
-        with open(script, "w", encoding="utf-8", newline="\n") as fh:
-            fh.write(
-                "import pathlib, sys\n"
-                "root = pathlib.Path(__file__).parent\n"
-                "(root / 'argv.txt').write_text('\\n'.join(sys.argv[1:]), encoding='utf-8')\n"
-                "print((root / 'gh_search_repos.json').read_text(encoding='utf-8'))\n"
-            )
-        if os.name == "nt":
-            gh = os.path.join(tmp, "gh.bat")
-            with open(gh, "w", encoding="ascii", newline="\r\n") as fh:
-                fh.write("@echo off\n")
-                fh.write(f'"{sys.executable}" "{script}" %*\n')
-        else:
-            gh = os.path.join(tmp, "gh")
-            with open(gh, "w", encoding="utf-8", newline="\n") as fh:
-                fh.write("#!/bin/sh\n")
-                fh.write(f'exec "{sys.executable}" "{script}" "$@"\n')
-            os.chmod(gh, 0o755)
+        """用录好的 JSON 回放 gh 输出，验证 _scan_one 的 argv（含 `--` 位置）。"""
+        with open(os.path.join(ROOT, "tests", "fixtures", "gh_search_repos.json"),
+                  encoding="utf-8") as fh:
+            payload = fh.read()
+        seen = {}
 
-        rows, err = rbb_core._scan_one("video clip", gh, 50, "2025-01-01", 6, 30)
+        def fake_gh(exe, args, timeout):
+            seen.update(exe=exe, argv=args, timeout=timeout)
+            return subprocess.CompletedProcess(["gh", *args], 0, payload, "")
+
+        with unittest.mock.patch.object(rbb_core, "_gh", side_effect=fake_gh):
+            rows, err = rbb_core._scan_one("video clip", "gh", 50, "2025-01-01", 6, 30)
         self.assertEqual(err, "")
         self.assertEqual(len(rows), 2)
         self.assertEqual(rows[0]["full_name"], "owner/autoclip")
-        with open(os.path.join(tmp, "argv.txt"), encoding="utf-8") as fh:
-            argv = fh.read().splitlines()
+        argv = seen["argv"]
         self.assertIn("--", argv)
         self.assertTrue(argv[-1].startswith("video clip "))
         self.assertLess(argv.index("--archived=false"), argv.index("--"))
@@ -233,7 +217,10 @@ class TestGhHardening(unittest.TestCase):
     def test_non_gh_executable_is_rejected(self):
         self.assertEqual(rbb_core.resolve_gh_executable("evil-payload.exe"), "")
         self.assertEqual(rbb_core.resolve_gh_executable("C:/tmp/evil.exe"), "")
-        self.assertEqual(rbb_core.resolve_gh_executable("C:/tmp/gh.exe"), "C:/tmp/gh.exe")
+        self.assertEqual(rbb_core.resolve_gh_executable("C:/tmp/gh.exe"), "")
+        self.assertEqual(rbb_core.resolve_gh_executable("C:/tmp/gh.bat"), "")
+        self.assertEqual(rbb_core.resolve_gh_executable("gh.cmd"), "")
+        self.assertEqual(rbb_core.resolve_gh_executable("gh"), "gh")
 
     def test_config_gh_binary_cannot_point_to_arbitrary_program(self):
         got = rbb_core.resolve_settings({"gh_binary": "C:/tmp/evil.exe"})
@@ -260,8 +247,67 @@ class TestGhHardening(unittest.TestCase):
         rows = rbb_core.parse_search_output('[1, "x", {"url": "u"}]')
         self.assertEqual(rows, [{"url": "u"}])
 
+    def test_bad_json_stdout_is_redacted(self):
+        with self.assertRaises(RuntimeError) as ctx:
+            rbb_core.parse_search_output('not-json api_key=abc123')
+        self.assertNotIn("abc123", str(ctx.exception))
+        self.assertIn("[redacted]", str(ctx.exception))
+
     def test_naive_pushed_at_does_not_crash(self):
         self.assertEqual(rbb_core.activity_points("2026-10-01T00:00:00"), 0)
+
+    def test_non_string_pushed_at_does_not_crash(self):
+        self.assertEqual(rbb_core.activity_points(123), 0)
+        self.assertEqual(rbb_core.activity_points(["2026-10-01"]), 0)
+
+    def test_auth_check_gets_partial_budget(self):
+        seen = []
+
+        def fake_auth(exe, timeout):
+            seen.append(timeout)
+            return True, ""
+
+        with unittest.mock.patch.object(rbb_core, "auth_ok", side_effect=fake_auth):
+            with unittest.mock.patch.object(rbb_core, "_scan_one", return_value=([], "boom")):
+                rbb_core.search_candidates(["a"], timeout=30)
+        self.assertEqual(seen, [10.0])
+
+    def test_auth_failure_is_code2_not_code3(self):
+        with unittest.mock.patch.object(rbb_core, "auth_ok", return_value=(False, "超时")):
+            res = rbb_core.search_candidates(["a"], timeout=5)
+        self.assertEqual(res["code"], 2)
+        self.assertIn("gh 未就绪", res["reason"])
+
+    def test_direct_params_are_clamped(self):
+        seen = {}
+
+        def fake_scan(kw, exe, stars, since, limit, timeout):
+            seen.update(stars=stars, since=since, limit=limit)
+            return [], ""
+
+        with unittest.mock.patch.object(rbb_core, "auth_ok", return_value=(True, "")):
+            with unittest.mock.patch.object(rbb_core, "_scan_one", side_effect=fake_scan):
+                res = rbb_core.search_candidates(
+                    ["a"], stars=-5, limit=999, updated_since="not-a-date", timeout=30
+                )
+        self.assertEqual(seen["stars"], 0)
+        self.assertEqual(seen["limit"], 10)
+        self.assertEqual(seen["since"], rbb_core.default_since(365))
+        self.assertIn("updated_since", res["note"])
+
+    def test_api_key_and_bearer_are_redacted(self):
+        msg = rbb_core.redact_text("api_key=abc123 Bearer sk-abcdefghij")
+        self.assertNotIn("abc123", msg)
+        self.assertNotIn("sk-abcdefghij", msg)
+        self.assertIn("[redacted]", msg)
+
+    def test_python_resolver_falls_back_to_py_launcher(self):
+        with unittest.mock.patch.object(rbb_core.sys, "executable", ""):
+            with unittest.mock.patch.object(
+                rbb_core.shutil, "which",
+                side_effect=lambda name: "C:/Windows/py.exe" if name == "py" else None,
+            ):
+                self.assertEqual(rbb_core.resolve_python(), "C:/Windows/py.exe")
 
 
     GOOD = """## 找到了什么
