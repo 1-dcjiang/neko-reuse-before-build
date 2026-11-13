@@ -193,6 +193,32 @@ class TestDeliverable(unittest.TestCase):
         res = rbb_core.check_deliverable(text)
         self.assertTrue(res["ok"], res["missing"])
 
+    def test_join_with_build_in_alternatives_does_not_require_gate(self):
+        """回归：结论 Join、备选段提到 Build 时，不得再误报 gate_line。"""
+        text = self.GOOD.replace(
+            "备选：fork 自维护。风险：维护者响应慢。",
+            "备选：fork 自维护；实在不成立才 Build，那时再补理由。风险：维护者响应慢。",
+        )
+        res = rbb_core.check_deliverable(text)
+        self.assertTrue(res["ok"], res["missing"])
+        self.assertNotIn("gate_line", res["missing"])
+
+    def test_ambiguous_verdict_without_conclusion_line_does_not_force_gate(self):
+        """没有结论行、结论词又不唯一时，只提示补结论行，不硬要门禁行。"""
+        text = self.GOOD.replace("结论：Join。", "").replace(
+            "备选：fork 自维护。", "备选：fork 自维护，或者 Build 自建。"
+        )
+        res = rbb_core.check_deliverable(text)
+        self.assertTrue(res["ok"], res["missing"])
+        self.assertTrue(any("结论不唯一" in note for note in res["notes"]), res["notes"])
+
+    def test_single_build_verdict_without_conclusion_line_requires_gate(self):
+        """没有结论行但全文只有 Build 这一个结论词时，门禁仍然生效。"""
+        text = self.GOOD.replace("结论：Join。", "").replace("备选：fork 自维护。", "备选：Build 自建。")
+        res = rbb_core.check_deliverable(text)
+        self.assertFalse(res["ok"])
+        self.assertIn("gate_line", res["missing"])
+
 
 class TestTable(unittest.TestCase):
     def test_md_cell_escapes_pipe_and_newline(self):

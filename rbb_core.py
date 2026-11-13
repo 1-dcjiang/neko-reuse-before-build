@@ -325,6 +325,11 @@ SECTIONS = [
 ]
 VERDICTS = ("Join", "Extend", "Fork", "Build", "加入", "扩展", "分叉", "新建")
 GATE_PREFIXES = ("Not reusable because:", "不可复用原因")
+# 门禁只看「结论是哪一条」，不看全文有没有出现过 Build——备选段几乎总会提到它。
+CONCLUSION_RX = re.compile(
+    r"(?:结论|verdict|conclusion)\s*[:：]\s*(Join|Extend|Fork|Build|加入|扩展|分叉|新建)",
+    re.IGNORECASE,
+)
 
 
 def check_deliverable(text: str) -> dict[str, Any]:
@@ -344,7 +349,18 @@ def check_deliverable(text: str) -> dict[str, Any]:
     else:
         notes.append("verdict: " + ", ".join(verdict_hit))
 
-    if any(v.lower() in ("build", "新建") for v in verdict_hit):
+    # 判定结论：优先看「结论：X」这一行；没有结论行时，只有全文唯一结论词才算数。
+    explicit = CONCLUSION_RX.search(body)
+    if explicit:
+        verdict = explicit.group(1).lower()
+    elif len(verdict_hit) == 1:
+        verdict = verdict_hit[0].lower()
+    else:
+        verdict = ""
+        if verdict_hit:
+            notes.append("结论不唯一：建议补一行「结论：Join/Extend/Fork/Build」；Build 门禁只按结论判定，不按备选段里的提及。")
+
+    if verdict in ("build", "新建"):
         line_ok = any(
             any(line.strip().lower().startswith(p.lower()) for p in GATE_PREFIXES)
             for line in body.splitlines()

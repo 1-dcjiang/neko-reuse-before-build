@@ -482,6 +482,28 @@ class TestPromptDigests(unittest.TestCase):
         self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
         self.assertIn("not-registered", p.stderr)
 
+    def test_broken_registry_returns_rc2_instead_of_traceback(self):
+        """登记表结构坏了要报 FAIL/rc=2，不能把 KeyError traceback 甩给使用者。"""
+        script = self.make_tree(self.read(self.HOST_ADAPTERS))
+        bad = os.path.join(os.path.dirname(os.path.dirname(script)), "prompt-digests.json")
+        for payload in (
+            '{"prompts": [{"versions": []}]}',
+            '{"prompts": [{"id": "x", "versions": "oops"}]}',
+            '{"prompts": [{"id": "x", "versions": []}, {"id": "x", "versions": []}]}',
+            '{"prompts": "not-a-list"}',
+        ):
+            with open(bad, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(payload)
+            for args in (["--verify"], ["--check", bad]):
+                p = subprocess.run(
+                    [sys.executable, "-X", "utf8", script, *args],
+                    capture_output=True, text=True, encoding="utf-8", errors="replace",
+                    timeout=60, check=False,
+                )
+                self.assertEqual(p.returncode, 2, f"{payload} {args}: {p.stdout}{p.stderr}")
+                self.assertIn("FAIL", p.stderr)
+                self.assertNotIn("Traceback", p.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
