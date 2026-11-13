@@ -12,7 +12,7 @@ N.E.K.O 里的 AI 接到「帮我做个 X」时，最容易干的事是直接写
 
 ## 版本记录
 
-完整修复与新增记录见 [CHANGELOG.md](CHANGELOG.md)。`0.3.2` 修的是复查里的五项：`rbb_verify` 路径收敛、`gh` 参数注入、配置失败可见、默认值去重与布尔显式解析、录好的 `gh` JSON 契约测试；`0.3.3` 清理 README 历史段并把市场短描述压到 255 字上限。
+完整修复与新增记录见 [CHANGELOG.md](CHANGELOG.md)。`0.3.2` 修的是复查里的五项：`rbb_verify` 路径收敛、`gh` 参数注入、配置失败可见、默认值去重与布尔显式解析、录好的 `gh` JSON 契约测试；`0.3.3` 清理 README 历史段并把市场短描述压到 255 字上限；`0.3.4` 按第二轮复查修异常穿透、检索总预算、`gh_binary` 收敛、`extra` 白名单、结论词边界、空键去重、无时区时间与 stderr 脱敏。
 
 ## 五个工具
 
@@ -28,7 +28,7 @@ N.E.K.O 里的 AI 接到「帮我做个 X」时，最容易干的事是直接写
 
 1. 下载 Release 里的 `reuse_before_build.neko-plugin`；
 2. N.E.K.O → 插件 → 安装本地插件包；
-3. 插件设置里确认 `enable_github_scan`（默认开）与 `gh_binary`（默认 `gh`）；
+3. 插件设置里确认 `enable_github_scan`（默认开）与 `gh_binary`（默认 `gh`，只允许 `gh` / `gh.exe`）；
 4. 点一次「自检规则完整性」，看到规则哈希与 `PASS … verbatim` 即可。
 
 没有 `gh` 也能装：检索会报 `code=2` 并给网页检索串，规则、格式检查、校验器照常可用。
@@ -70,13 +70,13 @@ docs/guide.md                      插件面板里的使用说明
 - `config.example.toml` 承接运行配置模板（不含 `[plugin]`），`[settings]` 默认值不重复抄写，消掉「legacy runtime configuration」警告；
 - `tests/test_smoke.py`、`.vscode/settings.json`、`.vscode/tasks.json`、`pyproject.toml`、`.gitignore` 齐备；
 - `.github/workflows/{verify,release}.yml` 复用官方 `plugin-market-{verify,release}.yml@main`；
-- 发版 tag 必须与 `[plugin].version` 相同（当前 `0.3.3` → tag `v0.3.3`）。
+- 发版 tag 必须与 `[plugin].version` 相同（当前 `0.3.4` → tag `v0.3.4`）。
 
 ## 验过什么
 
-本版（v0.3.3）：
+本版（v0.3.4）：
 
-- **本地**：`python -m pytest tests` **49 passed**（离线 37 + SDK 桩 9 + 市场 smoke 3）；`ruff check .` 全绿；官方 `check -r` 通过（`tests=passed`、`payload_hash_verified=True`）。
+- **本地**：`python -m pytest tests` **59 passed**；`ruff check .` 全绿；官方 `check -r` 通过（`tests=passed`、`payload_hash_verified=True`）。
 - **随包 skill**：`verify_localized.py` 对 `SKILL.md` 输出 `PASS verbatim`，`zh-guide.md` 输出 `translated(zh)`；规则块哈希 `fa0f991f…bc93` 未变。
 - **CI**：Verify / Release 的证据见本版 Release 的 `market-evidence.json`。
 

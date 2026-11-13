@@ -14,7 +14,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
+import unittest.mock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -209,7 +211,59 @@ class TestSearchWrapper(unittest.TestCase):
         self.assertLess(argv.index("--archived=false"), argv.index("--"))
 
 
-class TestDeliverable(unittest.TestCase):
+class TestGhHardening(unittest.TestCase):
+    """第二轮复查的回归：异常不漏、gh 不可换程序、stderr 脱敏、坏 JSON 不崩。"""
+
+    def test_scan_timeout_is_a_total_budget(self):
+        """scan_timeout 是整次检索的总预算：第二个关键词拿到的是剩余时间，不是又一次 30s。"""
+        seen = []
+
+        def fake_scan(kw, exe, stars, since, limit, timeout):
+            seen.append(timeout)
+            time.sleep(0.05)
+            return [], "boom"
+
+        with unittest.mock.patch.object(rbb_core, "auth_ok", return_value=(True, "")):
+            with unittest.mock.patch.object(rbb_core, "_scan_one", side_effect=fake_scan):
+                res = rbb_core.search_candidates(["a", "b"], timeout=5)
+        self.assertEqual(res["code"], 3)
+        self.assertEqual(len(seen), 2)
+        self.assertLess(seen[1], 5.0, f"第二个关键词没有共享总预算：{seen}")
+
+    def test_non_gh_executable_is_rejected(self):
+        self.assertEqual(rbb_core.resolve_gh_executable("evil-payload.exe"), "")
+        self.assertEqual(rbb_core.resolve_gh_executable("C:/tmp/evil.exe"), "")
+        self.assertEqual(rbb_core.resolve_gh_executable("C:/tmp/gh.exe"), "C:/tmp/gh.exe")
+
+    def test_config_gh_binary_cannot_point_to_arbitrary_program(self):
+        got = rbb_core.resolve_settings({"gh_binary": "C:/tmp/evil.exe"})
+        self.assertEqual(got["gh_binary"], "gh")
+        self.assertIn("gh_binary", got["settings_warning"])
+
+    def test_permission_error_becomes_runtime_error(self):
+        with unittest.mock.patch.object(rbb_core, "_gh", side_effect=PermissionError("denied")):
+            rows, err = rbb_core._scan_one("k", "gh", 50, "2025-01-01", 6, 5)
+        self.assertEqual(rows, [])
+        self.assertIn("gh 启动失败", err)
+
+    def test_gh_stderr_is_redacted(self):
+        exc = subprocess.CompletedProcess(
+            ["gh"], 1, "", "token=ghp_abcdefghijklmnopqrstuvwxyz0123456789 denied"
+        )
+        with unittest.mock.patch.object(rbb_core, "_gh", return_value=exc):
+            with self.assertRaises(RuntimeError) as ctx:
+                rbb_core.gh_json("gh", ["search"], 5)
+        self.assertNotIn("ghp_abcdefghijklmnopqrstuvwxyz", str(ctx.exception))
+        self.assertIn("[redacted]", str(ctx.exception))
+
+    def test_non_dict_json_rows_are_dropped(self):
+        rows = rbb_core.parse_search_output('[1, "x", {"url": "u"}]')
+        self.assertEqual(rows, [{"url": "u"}])
+
+    def test_naive_pushed_at_does_not_crash(self):
+        self.assertEqual(rbb_core.activity_points("2026-10-01T00:00:00"), 0)
+
+
     GOOD = """## 找到了什么
 | 仓库 | ★ | 最近推送 |
 |---|---|---|
@@ -269,6 +323,16 @@ class TestDeliverable(unittest.TestCase):
         self.assertTrue(res["ok"], res["missing"])
         self.assertTrue(any("结论不唯一" in note for note in res["notes"]), res["notes"])
 
+    def test_rebuild_building_do_not_trigger_build_gate(self):
+        """回归：rebuild / building 里的 build 不是结论词，不能误触发 Build 门禁。"""
+        text = self.GOOD.replace(
+            "备选：fork 自维护。风险：维护者响应慢。",
+            "备选：在现有仓库里 rebuild 或继续 building 新模块。风险：维护者响应慢。",
+        )
+        res = rbb_core.check_deliverable(text)
+        self.assertTrue(res["ok"], res["missing"])
+        self.assertNotIn("gate_line", res["missing"])
+
     def test_single_build_verdict_without_conclusion_line_requires_gate(self):
         """没有结论行但全文只有 Build 这一个结论词时，门禁仍然生效。"""
         text = self.GOOD.replace("结论：Join。", "").replace("备选：fork 自维护。", "备选：Build 自建。")
@@ -324,6 +388,17 @@ class TestVerifyPathJail(unittest.TestCase):
         real, err = rbb_core.resolve_localized_path("../README.md")
         self.assertEqual(real, "")
         self.assertIn("不在插件工作目录内", err)
+
+    def test_extra_flags_cannot_enable_canonical_bypass(self):
+        """`--canonical` 不给模型侧注入：即使传进来也只会走完整声明校验。"""
+        dst = os.path.join(ROOT, "_review_localized_copy.md")
+        with open(SKILL_MD, encoding="utf-8") as fh:
+            text = fh.read()
+        with open(dst, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(text.rstrip() + "\n\nlocalized: host=test | kept=all | changed=none | unsupported=none\n")
+        self.addCleanup(lambda: os.path.exists(dst) and os.remove(dst))
+        res = rbb_core.verify_localized(dst, extra=["--canonical"])
+        self.assertEqual(res["rc"], 0, res["err"] or res["out"])
 
 
 class TestSettings(unittest.TestCase):

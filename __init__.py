@@ -111,7 +111,7 @@ class ReuseBeforeBuildPlugin(NekoPluginBase):
 
     async def _probe_hash(self):
         try:
-            h, err = await asyncio.to_thread(rbb_core.canonical_hash, self._python)
+            h, err = await asyncio.to_thread(rbb_core.canonical_hash, self._python, self._timeout)
             self._rule_hash = h
             if err:
                 self.logger.warning("规则哈希计算失败：%s", err)
@@ -325,7 +325,7 @@ class ReuseBeforeBuildPlugin(NekoPluginBase):
         target = str(path or params.get("path") or "").strip()
         if not target:
             return Err(SdkError("缺少 path（待校验副本路径）。给插件目录内的 .md 路径再调一次。"))
-        res = await asyncio.to_thread(rbb_core.verify_localized, target, self._python)
+        res = await asyncio.to_thread(rbb_core.verify_localized, target, self._python, None, self._timeout)
         if res["rc"] == 0:
             return Ok({"ok": True, "exit_code": 0, "output": res["out"]})
         return Ok({
@@ -349,7 +349,8 @@ class ReuseBeforeBuildPlugin(NekoPluginBase):
         if not self._rule_hash:
             await self._probe_hash()
         gh_ok, gh_why = await asyncio.to_thread(rbb_core.auth_ok, self._gh_binary, self._timeout)
-        bundled = await asyncio.to_thread(rbb_core.verify_localized, rbb_core.SKILL_MD, self._python)
+        bundled = await asyncio.to_thread(rbb_core.verify_localized, rbb_core.SKILL_MD,
+                                            self._python, None, self._timeout)
         return Ok({
             "plugin": "reuse_before_build",
             "rule_sha256": self._rule_hash or "无法计算",
@@ -382,7 +383,8 @@ class ReuseBeforeBuildPlugin(NekoPluginBase):
         """给用户一个可点的自检：确认随包规则没被改动、gh 能用。"""
         if not self._rule_hash:
             await self._probe_hash()
-        bundled = await asyncio.to_thread(rbb_core.verify_localized, rbb_core.SKILL_MD, self._python)
+        bundled = await asyncio.to_thread(rbb_core.verify_localized, rbb_core.SKILL_MD,
+                                            self._python, None, self._timeout)
         gh_ok, gh_why = await asyncio.to_thread(rbb_core.auth_ok, self._gh_binary, self._timeout)
         self.report_status({
             "status": "completed" if bundled["rc"] == 0 else "failed",

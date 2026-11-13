@@ -12,6 +12,7 @@ import importlib.util
 import os
 import sys
 import unittest
+import unittest.mock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STUB = os.path.join(ROOT, "tests", "stub")
@@ -111,13 +112,22 @@ class TestPluginRuntime(unittest.TestCase):
         self.assertIn("enable_github_scan", _err_text(res))
 
     def test_scan_reports_unavailable_not_empty(self):
-        plugin, _ = asyncio.run(self._lifecycle(
-            self.mod.ReuseBeforeBuildPlugin, {"gh_binary": "gh-not-installed-xyz"}))
-        res = asyncio.run(plugin.rbb_scan(keywords=["video clip"]))
+        plugin, _ = asyncio.run(self._lifecycle(self.mod.ReuseBeforeBuildPlugin, {}))
+        with unittest.mock.patch("shutil.which", return_value=None):
+            res = asyncio.run(plugin.rbb_scan(keywords=["video clip"]))
         self.assertFalse(res.is_ok())
         msg = _err_text(res)
         self.assertIn("code=2", msg)
         self.assertIn("不等于没有同类项目", msg)
+
+    def test_invalid_gh_binary_falls_back_with_warning(self):
+        """配置里写任意程序名不能再变成执行入口：回退 gh，并在 status 里给出 warning。"""
+        plugin, _ = asyncio.run(self._lifecycle(
+            self.mod.ReuseBeforeBuildPlugin, {"gh_binary": "C:/tmp/evil.exe"}))
+        res = asyncio.run(plugin.rbb_status())
+        self.assertTrue(res.is_ok(), _err_text(res))
+        self.assertEqual(res.value["gh"]["binary"], "gh")
+        self.assertIn("gh_binary", res.value["settings"]["warning"])
 
     def test_check_tool_flags_missing_parts(self):
         plugin, _ = asyncio.run(self._lifecycle(self.mod.ReuseBeforeBuildPlugin, {}))

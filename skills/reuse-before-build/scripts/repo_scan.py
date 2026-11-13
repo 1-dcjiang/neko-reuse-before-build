@@ -22,6 +22,7 @@ import argparse
 import datetime as dt
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -44,6 +45,20 @@ FAIL_HINT = (
     "检索失败 ≠ 没有同类项目。检查 `gh auth status` 与网络后重跑，"
     "或改用 references/discovery-playbook.md 的网页检索串手工复核；不要据此断言不存在。"
 )
+_SECRET_RX = re.compile(
+    r"(?i)(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|"
+    r"(?:token|password|secret)\s*[:=]\s*\S+)"
+)
+
+
+def redact_text(value: object, limit: int = 300) -> str:
+    """错误文本回给模型前脱敏：不把 token、口令和本机绝对路径原样吐出去。"""
+    text = str(value or "")
+    home = os.path.expanduser("~")
+    if home:
+        text = text.replace(home, "~")
+    text = _SECRET_RX.sub("[redacted]", text)
+    return text[:limit]
 
 
 def default_since(today: dt.date | None = None) -> str:
@@ -63,7 +78,10 @@ def md_cell(value: object) -> str:
 
 
 def parse_search_output(out: str) -> list[dict]:
-    """把 `gh search repos --json …` 的真实输出解析成行；供契约测试直接复用。"""
+    """把 `gh search repos --json …` 的真实输出解析成行；供契约测试直接复用。
+
+    只保留 dict 行：gh 偶尔会输出标量或嵌套错误对象，后面的 `row.get` 不能因此崩。
+    """
     text = (out or "").strip()
     if not text:
         return []
@@ -71,10 +89,14 @@ def parse_search_output(out: str) -> list[dict]:
         parsed = json.loads(text)
     except ValueError as exc:
         raise RuntimeError(f"gh 输出不是 JSON（{exc}）：{text[:200]}") from None
-    return parsed if isinstance(parsed, list) else [parsed]
+    if isinstance(parsed, dict):
+        return [parsed]
+    if isinstance(parsed, list):
+        return [item for item in parsed if isinstance(item, dict)]
+    return []
 
 
-def gh_json(args: list[str], timeout: int = 60) -> list[dict]:
+def gh_json(args: list[str], timeout: float = 60) -> list[dict]:
     try:
         proc = subprocess.run(
             ["gh", *args],
@@ -88,9 +110,11 @@ def gh_json(args: list[str], timeout: int = 60) -> list[dict]:
     except FileNotFoundError:
         raise RuntimeError("gh 可执行文件不在了（PATH 变了？）") from None
     except subprocess.TimeoutExpired:
-        raise RuntimeError(f"gh 超时（>{timeout}s）") from None
+        raise RuntimeError(f"gh 超时（>{timeout:g}s）") from None
+    except OSError as exc:
+        raise RuntimeError(f"gh 启动失败：{redact_text(exc)}") from None
     if proc.returncode != 0:
-        raise RuntimeError(f"gh 失败（exit {proc.returncode}）：{proc.stderr.strip()[:300]}")
+        raise RuntimeError(f"gh 失败（exit {proc.returncode}）：{redact_text(proc.stderr.strip())}")
     return parse_search_output(proc.stdout)
 
 
@@ -120,9 +144,9 @@ def activity_points(pushed_at: str) -> int:
         return 0
     try:
         pushed = dt.datetime.fromisoformat(pushed_at.replace("Z", "+00:00"))
-    except ValueError:
+        days = (dt.datetime.now(dt.timezone.utc) - pushed).days
+    except (TypeError, ValueError, OverflowError):
         return 0
-    days = (dt.datetime.now(dt.timezone.utc) - pushed).days
     if days <= 90:
         return 2
     if days <= 365:
@@ -161,9 +185,11 @@ def auth_ok() -> tuple[bool, str]:
         return False, "gh 可执行文件不在了（PATH 变了？）"
     except subprocess.TimeoutExpired:
         return False, "`gh auth status` 超时（>30s）"
+    except OSError as exc:
+        return False, f"gh 启动失败：{redact_text(exc, 200)}"
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout or "").strip().splitlines()
-        return False, f"{host}：{detail[0][:200] if detail else 'gh auth status 返回非零'}"
+        return False, f"{host}：{redact_text(detail[0], 200) if detail else 'gh auth status 返回非零'}"
     return True, ""
 
 
@@ -225,6 +251,8 @@ def main() -> int:
             failed.append(kw)
         for row in rows:
             key = (row.get("url") or row.get("full_name") or "").rstrip("/").lower()
+            if not key:
+                continue
             if key in merged:
                 if isinstance(merged[key]["matched_keyword"], list):
                     merged[key]["matched_keyword"].append(kw)
