@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.3.4 — 2026-11-14
+
+按第二轮第三方复查（8 条问题 + 3 条优先项）修的加固：
+
+- **异常不漏**：`gh_json` / `auth_ok` / `canonical_hash` / `verify_localized` 统一捕获 `OSError`（含 `PermissionError`），`_scan_one` 捕获 `OSError` + `RuntimeError`；子进程启动失败不再穿透到工具层。
+- **`scan_timeout` 真正生效**：整次 `rbb_scan` 共享一份总预算（登录检查 + 所有关键词），每个关键词只拿到剩余时间；哈希/校验也走同一个超时参数，不再写死 30/60 秒。
+- **`gh_binary` 收敛**：配置只允许 `gh` / `gh.exe`，其它值回退 `gh` 并在 `settings.warning` 说明；库调用仍可注入文件名必须是 gh 系列的测试替身，非法名字直接按「gh 不可用」处理。
+- **`extra` 白名单**：`verify_localized` 只接受 `--quiet`，`--canonical` 等可跳过声明检查的开关不能由模型侧注入。
+- **结论词边界**：`check_deliverable` 的 ASCII 结论词改整词匹配，`rebuild` / `building` 不再误命中 `Build`。
+- **去重键**：`url` 与 `full_name` 都空的行直接丢弃，不再把互不相关的仓合并成一条。
+- **无时区时间**：`activity_points` 把 `now - pushed` 一起纳入 `try`，`naive` 时间抛 `TypeError` 时返回 0 而不是崩。
+- **stderr 脱敏**：回给模型的 `reason` 经 `redact_text()` 去掉 token/口令与本机绝对路径，并截断。
+- **坏 JSON**：`parse_search_output` 只保留 dict 行，非 dict 输出不再让 `row.get` 崩。
+- 测试：新增 OSError 穿透、总预算、非法 `gh_binary`、`extra` 白名单、`rebuild` 词边界、空键去重、无时区时间、stderr 脱敏、非 dict JSON 的离线回归；59 passed，ruff check 全绿。
+- 规则本体、契约哈希 `fa0f991f…bc93`、四段提示词 sha256 未动。
+
 ## 0.3.3 — 2026-11-14
 
 - `short_description` 压到市场展示字段 255 字上限（当前 112 字），避免「编辑展示信息」保存时被 `String should have at most 255 characters` 拒绝。

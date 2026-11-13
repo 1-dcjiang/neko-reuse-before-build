@@ -27,11 +27,11 @@
 | 项 | 默认 | 说明 |
 |---|---|---|
 | `enable_github_scan` | 开 | 关掉后 `rbb_scan` 直接返回「检索已关闭」，不会静默失败 |
-| `gh_binary` | `gh` | 可执行名或绝对路径 |
+| `gh_binary` | `gh` | 只允许 `gh` / `gh.exe`；填其它值会回退到 `gh` 并给出 warning |
 | `default_stars` | 50 | 星数门槛；查不到时降到 0 再试 |
 | `default_limit` | 6 | 每个关键词条数，工具里最大 10 |
 | `updated_days` | 365 | 只看最近 N 天有推送的仓库 |
-| `scan_timeout` | 30 | 单次 gh 调用超时（秒） |
+| `scan_timeout` | 30 | 整次检索总预算（登录检查 + 所有关键词共享），不是每个关键词各一份 |
 
 默认值只在 `plugin.toml` 的 `[settings]` 写一份。`rbb_status.settings` 会显示 `source`（`runtime` / `plugin.toml` / `emergency-defaults`）与 `warning`；看到 `emergency-defaults` 说明配置文件坏了，正在用降级值（检索会被关掉、条数压到 1），修好 `plugin.toml` 再重载。
 
