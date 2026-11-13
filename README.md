@@ -10,6 +10,13 @@ N.E.K.O 里的 AI 接到「帮我做个 X」时，最容易干的事是直接写
 
 规则本体不是插件作者的一句话，而是随包冻结的一段文本：带 `<!-- RBB:INVARIANTS -->` 标记和 sha256。删条、改编号、丢门禁会被随包校验器当场报错——对 AI，也对维护这个插件的人。
 
+## v0.3.1 修复（代码复查）
+
+- **交付检查不再误伤 Join 结论**：`check_deliverable` 原先只要全文出现 `Build`/`新建`（备选段几乎必然提到）就强制要 `不可复用原因` 行；现改为优先按「结论：X」行判定，无结论行时仅在全文结论词唯一时才套门禁，并提示补结论行。新增 3 条回归。
+- **登记表坏结构不再抛 traceback**：`prompt_digest.py` 缺 `id` / `versions` 非数组 / id 重复 / `prompts` 非数组 → `FAIL` + 退出码 2（与文档一致），新增 1 条覆盖四种坏表的回归。
+- **入口参数防御**：`rbb_scan` 的 `stars`/`limit` 被传成非数字时回默认值而不是 `ValueError`；启动哈希任务保留引用，避免被 GC。
+- 同步主仓 v1.2.1 的 E741 清理，规则本体与块哈希不变。
+
 ## v0.3.0 新增（同步上游 v1.2.0）
 
 - **粘贴型提示词带 sha256**：聊天式 AI 只能吃「一段复制粘贴的提示词」，而这段文字最容易在复制、精简、翻译中静默走样。新增 `prompt-digests.json`（四段提示词的 `id` / 版本 / sha256 / 字符数，旧版本留档）与 `scripts/prompt_digest.py`：
@@ -81,20 +88,20 @@ docs/guide.md                      插件面板里的使用说明
 - `config.example.toml` 承接可变默认值（不含 `[plugin]`），消掉「legacy runtime configuration」警告；
 - `tests/test_smoke.py`、`.vscode/settings.json`、`.vscode/tasks.json`、`pyproject.toml`、`.gitignore` 齐备；
 - `.github/workflows/{verify,release}.yml` 复用官方 `plugin-market-{verify,release}.yml@main`；
-- 发版 tag 必须与 `[plugin].version` 相同（当前 `0.3.0` → tag `v0.3.0`）。
+- 发版 tag 必须与 `[plugin].version` 相同（当前 `0.3.1` → tag `v0.3.1`）。
 
 ## 验过什么
 
-本版（v0.3.0）：
+本版（v0.3.1）：
 
-- **本地**：32 项 `unittest`（离线 + SDK 桩）、随包 skill **40** 项（新增 6 条提示词摘要回归：登记表与文档一致 / 命中 / 改一个词 NO MATCH / CRLF 容错 / 文档改了登记表没更新 FAIL / 未登记块被点名）、双正典 `verify_localized.py` 均 `PASS`（`SKILL.md` verbatim、`zh-guide.md` translated(zh)）。
+- **本地**：35 项 `unittest`（离线 + SDK 桩，新增 3 条结论判定回归）、随包 skill **41** 项（新增 6 条提示词摘要回归 + 1 条坏登记表容错：登记表与文档一致 / 命中 / 改一个词 NO MATCH / CRLF 容错 / 文档改了登记表没更新 FAIL / 未登记块被点名）、双正典 `verify_localized.py` 均 `PASS`（`SKILL.md` verbatim、`zh-guide.md` translated(zh)）。
 - **CI**：Verify / Release 的证据见本版 Release 的 `market-evidence.json`。
 
 v0.1.1 的历史记录（跑的是官方 `plugin-market-verify.yml` / `plugin-market-release.yml`，不是本地模拟）：
 
 - **Verify**（push 与 tag 各一次）：ruff（`E4,E7,E9,F,I` / py311 / 120 列）→ `sync --clean` → `check --release` → `pytest`（35 项：本仓 32 + 随包 skill 3 条 smoke）→ 打包并校验「包里恰好一个 `manifest.toml`」→ 生成 `market-evidence.json`。
 - **Release**：`v0.1.1` 资产已产出 `reuse_before_build.neko-plugin`（81,181 字节 / sha256 `955425…5578` / payload_hash `8cc6d1…4ba1`），`market-evidence.json` 记录 `payload_hash_verified=true`、`tests=passed`、版本与 tag 一致（`source_commit` = `b803594`，`neko_commit` = `09e5160`）。
-- **本地**：32 项 `unittest`（离线 + SDK 桩）、随包 skill 30 项、`verify_localized.py` 输出 `PASS verbatim rules=[1,2,3,4,5]/5`。
+- **本地**：35 项 `unittest`（离线 + SDK 桩，新增 3 条结论判定回归）、随包 skill 30 项、`verify_localized.py` 输出 `PASS verbatim rules=[1,2,3,4,5]/5`。
 
 > CI 里只剩两条环境性提示：`plugin source directory does not have its own git repository`（CI 把源目录拷出来构建导致），以及 Node 20 弃用提示（由官方复用工作流的 action 版本决定，非本仓可控）。
 

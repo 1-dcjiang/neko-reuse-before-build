@@ -116,8 +116,31 @@ def extract_blocks(path: str) -> list[dict]:
 
 
 def load_registry(path: str) -> dict:
-    with open(path, encoding="utf-8") as fh:
+    with open(path, encoding="utf-8-sig") as fh:
         return json.load(fh)
+
+
+def registry_entries(registry: dict) -> list[dict]:
+    """登记表结构校验。坏表必须走 FAIL/rc=2，不能抛 KeyError traceback 给使用者。"""
+    if not isinstance(registry, dict):
+        raise ValueError("prompt-digests.json 顶层不是对象")
+    prompts = registry.get("prompts")
+    if not isinstance(prompts, list):
+        raise ValueError("prompt-digests.json 缺少 prompts 数组")
+    seen: set[str] = set()
+    for entry in prompts:
+        if not isinstance(entry, dict) or not isinstance(entry.get("id"), str) or not entry["id"]:
+            raise ValueError("prompt-digests.json 里有条目缺 id（或条目本身不是对象）")
+        if entry["id"] in seen:
+            raise ValueError(f"prompt-digests.json 里 id={entry['id']} 登记了两次")
+        seen.add(entry["id"])
+        versions = entry.get("versions")
+        if not isinstance(versions, list):
+            raise ValueError(f"登记项 {entry['id']} 的 versions 不是数组")
+        for version in versions:
+            if not isinstance(version, dict) or not isinstance(version.get("sha256"), str):
+                raise ValueError(f"登记项 {entry['id']} 有版本缺 sha256（或版本不是对象）")
+    return prompts
 
 
 def read_input(target: str) -> str:
@@ -133,11 +156,11 @@ def cmd_verify(args) -> int:
     try:
         blocks = extract_blocks(SOURCE)
         registry = load_registry(REGISTRY)
+        entries = {p["id"]: p for p in registry_entries(registry)}
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"FAIL  无法核对：{exc}", file=sys.stderr)
         return 2
 
-    entries = {p["id"]: p for p in registry.get("prompts", [])}
     failures = 0
     seen: set[str] = set()
 
@@ -182,13 +205,14 @@ def cmd_check(args) -> int:
     try:
         text = read_input(args.check)
         registry = load_registry(REGISTRY)
-    except (OSError, json.JSONDecodeError) as exc:
+        entries = registry_entries(registry)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"FAIL  无法核对：{exc}", file=sys.stderr)
         return 2
 
     got, chars = digest_of(text)
     hits: list[dict] = []
-    for entry in registry.get("prompts", []):
+    for entry in entries:
         for version in entry.get("versions", []):
             if version.get("sha256") == got:
                 hits.append(
@@ -236,8 +260,8 @@ def cmd_emit(args) -> int:
     old: dict[str, list[dict]] = {}
     if os.path.isfile(REGISTRY):
         try:
-            old = {p["id"]: p.get("versions", []) for p in load_registry(REGISTRY).get("prompts", [])}
-        except (OSError, json.JSONDecodeError) as exc:
+            old = {p["id"]: p.get("versions", []) for p in registry_entries(load_registry(REGISTRY))}
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
             print(f"[warn] 读旧登记表失败，历史摘要不会保留：{exc}", file=sys.stderr)
 
     prompts = []
@@ -263,7 +287,7 @@ def cmd_emit(args) -> int:
         "note": "versions[0] 是当前随包的版本；旧版本留在后面，用来识别用户手上那版。用 scripts/prompt_digest.py --emit 生成，别手抄摘要。",
         "prompts": prompts,
     }
-    print(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0
 
 

@@ -49,6 +49,7 @@ class ReuseBeforeBuildPlugin(NekoPluginBase):
         self._timeout: int = 30
         self._python: str = ""
         self._rule_hash: str = ""
+        self._hash_task: asyncio.Task | None = None
 
     # ══════════ 生命周期 ══════════
 
@@ -56,8 +57,8 @@ class ReuseBeforeBuildPlugin(NekoPluginBase):
     async def on_startup(self, **_):
         try:
             await self._load_settings()
-            # 哈希计算要跑一次子进程，放后台，避免超过 10 秒就绪窗口
-            asyncio.create_task(self._probe_hash())
+            # 哈希计算要跑一次子进程，放后台，避免超过 10 秒就绪窗口；留引用防止任务被 GC
+            self._hash_task = asyncio.create_task(self._probe_hash())
             return Ok({"status": "ready", "gh_scan": self._enable_scan})
         except Exception as e:
             self.logger.exception("startup failed")
@@ -109,6 +110,14 @@ class ReuseBeforeBuildPlugin(NekoPluginBase):
         """宿主调用 llm_tool 时 parameters 键偶发被传成标量，这里统一防御。"""
         raw = extra.get("parameters") if isinstance(extra, dict) else None
         return raw if isinstance(raw, dict) else {}
+
+    @staticmethod
+    def _as_int(value, default: int) -> int:
+        """宿主可能把数字参数传成字符串甚至乱值；转换失败就回默认，不让工具直接抛。"""
+        try:
+            return int(str(value).strip())
+        except (TypeError, ValueError):
+            return int(default)
 
     @staticmethod
     def _as_keywords(value, params: dict) -> list[str]:
@@ -205,9 +214,8 @@ class ReuseBeforeBuildPlugin(NekoPluginBase):
             return Err(SdkError("缺少检索关键词 keywords。给 1–5 个英文检索串再调一次。"))
         if len(kws) > 5:
             return Err(SdkError(f"关键词给了 {len(kws)} 个，上限 5 个。合并同义词后再试。"))
-        st = int(stars or params.get("stars") or self._stars)
-        lm = int(limit or params.get("limit") or self._limit)
-        lm = min(10, max(1, lm))
+        st = self._as_int(stars or params.get("stars"), self._stars)
+        lm = min(10, max(1, self._as_int(limit or params.get("limit"), self._limit)))
         since = str(updated_since or params.get("updated_since") or "").strip()
 
         res = await asyncio.to_thread(
