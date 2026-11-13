@@ -337,5 +337,48 @@ class TestVerifier(unittest.TestCase):
         self.assertIn("verbatim", p.stdout)
 
 
+class TestDocs(unittest.TestCase):
+    """文档级回归：可改性硬闸、薄适配层、分支纪律必须真的写进正典，不能只存在于某次对话。"""
+
+    def read(self, *parts):
+        with open(os.path.join(ROOT, *parts), encoding="utf-8") as fh:
+            return fh.read()
+
+    def test_integration_seam_reference_exists_and_is_linked(self):
+        seam = self.read("references", "integration-seam.md")
+        self.assertIn("薄适配层", seam)
+        self.assertIn("150", seam)
+        self.assertIn("契约测试", seam)
+        paths = [("SKILL.md",), ("references", "zh-guide.md"), ("references", "contribution-protocol.md")]
+        if os.path.exists(os.path.join(ROOT, "README.md")):
+            # 有的宿主形态（如 N.E.K.O 插件包）按规范不随附 README，跳过该链接检查
+            paths.append(("README.md",))
+        for path in paths:
+            self.assertIn("integration-seam.md", self.read(*path), f"未链接适配层参考：{path}")
+
+    def test_modifiability_gate_is_in_triage_and_both_editions(self):
+        triage = self.read("references", "repo-triage.md")
+        self.assertIn("可改性硬闸", triage)
+        self.assertIn("即使总分 ≥ 8 也不允许 Join", triage)
+        self.assertIn("屎山检测", triage)
+        self.assertIn("Modifiability gate", self.read("SKILL.md"))
+        self.assertIn("可改性硬闸", self.read("references", "zh-guide.md"))
+
+    def test_branch_discipline_is_in_protocol_and_hard_constraints(self):
+        protocol = self.read("references", "contribution-protocol.md")
+        self.assertIn("分支纪律", protocol)
+        self.assertIn("禁止直接向", protocol)
+        self.assertIn("Never commit or push directly to the default branch", self.read("SKILL.md"))
+        self.assertIn("不直接向默认分支", self.read("references", "zh-guide.md"))
+
+    def test_never_join_red_and_adapter_constraints(self):
+        skill = self.read("SKILL.md")
+        self.assertIn("Never Join a repo whose modifiability", skill)
+        self.assertIn("Never let business code import upstream internals", skill)
+        zh = self.read("references", "zh-guide.md")
+        self.assertIn("不 Join 可改性判红的仓库", zh)
+        self.assertIn("不让业务代码 import 上游内部路径", zh)
+
+
 if __name__ == "__main__":
     unittest.main()
