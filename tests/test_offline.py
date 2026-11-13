@@ -364,6 +364,8 @@ class TestSettings(unittest.TestCase):
         got = rbb_core.resolve_settings(None, plugin_toml=os.path.join(ROOT, "no-such-plugin.toml"))
         self.assertEqual(got["settings_source"], "emergency-defaults")
         self.assertIn("plugin.toml", got["settings_warning"])
+        self.assertFalse(got["enable_github_scan"], "兜底必须关掉检索")
+        self.assertEqual(got["default_stars"], 0)
         self.assertEqual(got["default_limit"], rbb_core.SETTINGS_DEFAULTS["default_limit"])
 
     def test_bundled_manifest_is_the_default_source(self):
