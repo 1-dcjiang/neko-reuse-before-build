@@ -120,6 +120,8 @@ python scripts/repo_scan.py "video highlight clip" "auto cut shorts" --stars 100
 
 四类：Skill 目录 / 仓库规则文件（AGENTS.md 等）/ 聊天自定义指令 / 自建 Agent system prompt。完整平台清单与规则文件名见 [host-adapters.md](host-adapters.md)。
 
+`host-adapters.md` 里每段可粘贴提示词都带嵌入式锚点，sha256 摘要登记在 [prompt-digests.json](../prompt-digests.json)。粘完把文本存成文件，跑 `python scripts/prompt_digest.py --check <文件>`，它会打出 `MATCH id=… version=…`；打出 `NO MATCH` 就是这段已经被改过或抄自别的版本，不能当成"装好了"。
+
 ## 自适配：改包装，不改规则
 
 宿主期待的形态可能和这份文件不一样——换一套 frontmatter、只吃一段扁平的系统提示、要 JSON 工具定义、要另一种语言、要插件清单、上下文预算更小。**首次使用时可以改包装，但不能改规则。**

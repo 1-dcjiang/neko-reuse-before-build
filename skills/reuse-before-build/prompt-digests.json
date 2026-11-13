@@ -1,0 +1,60 @@
+{
+  "schema": 1,
+  "normalize": "utf-8, LF, 去行尾空白, 去首尾空行",
+  "note": "versions[0] 是当前随包的版本；旧版本留在后面，用来识别用户手上那版。用 scripts/prompt_digest.py --emit 生成，别手抄摘要。",
+  "prompts": [
+    {
+      "id": "zh-condensed",
+      "label": "精简版（中文，约 300 字，可直接粘贴）",
+      "source": "references/host-adapters.md",
+      "versions": [
+        {
+          "version": "p1",
+          "sha256": "4b6d3e81a93d98a120e92a1b7771ff46c92a232117004825d6ee36e37001074b",
+          "chars": 711,
+          "released": "v1.2.0"
+        }
+      ]
+    },
+    {
+      "id": "en-condensed",
+      "label": "Condensed prompt (English, ~250 words)",
+      "source": "references/host-adapters.md",
+      "versions": [
+        {
+          "version": "p1",
+          "sha256": "6ad60f74f65dc63e2fc085002504e35966666b6d4db1e02efe807a070e1f6e45",
+          "chars": 1930,
+          "released": "v1.2.0"
+        }
+      ]
+    },
+    {
+      "id": "strict-gate",
+      "label": "严格版补充（团队/自动化代理用）",
+      "source": "references/host-adapters.md",
+      "versions": [
+        {
+          "version": "p1",
+          "sha256": "39c9f4c2fd5ec9f9ec66f260260ea4197742639183b4f15d0dfd0affa7f4e8c5",
+          "chars": 119,
+          "released": "v1.2.0"
+        }
+      ]
+    },
+    {
+      "id": "localize-instruction",
+      "label": "交给宿主的本地化指令（可直接粘贴）",
+      "source": "references/host-adapters.md",
+      "versions": [
+        {
+          "version": "p1",
+          "sha256": "194851ea4a48e7caafbd178f0739f3848749183d68008837c266574bad8f320e",
+          "chars": 578,
+          "released": "v1.2.0"
+        }
+      ]
+    }
+  ]
+}
+

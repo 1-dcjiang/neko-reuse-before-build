@@ -10,6 +10,15 @@ N.E.K.O 里的 AI 接到「帮我做个 X」时，最容易干的事是直接写
 
 规则本体不是插件作者的一句话，而是随包冻结的一段文本：带 `<!-- RBB:INVARIANTS -->` 标记和 sha256。删条、改编号、丢门禁会被随包校验器当场报错——对 AI，也对维护这个插件的人。
 
+## v0.3.0 新增（同步上游 v1.2.0）
+
+- **粘贴型提示词带 sha256**：聊天式 AI 只能吃「一段复制粘贴的提示词」，而这段文字最容易在复制、精简、翻译中静默走样。新增 `prompt-digests.json`（四段提示词的 `id` / 版本 / sha256 / 字符数，旧版本留档）与 `scripts/prompt_digest.py`：
+  - `--check <文件|->`：反查这段提示词是哪个 id、哪一版；改过就 `NO MATCH` + 退出码 1。
+  - `--verify`：登记表与 `references/host-adapters.md` 是否一致，发版前跑。
+  - 摘要按「UTF-8、LF、去行尾空白、去首尾空行」计算：CRLF、尾随空格、复制多出的空行不误报，真改词必然不匹配。
+- **`RBB:PROMPT` 锚点**：`host-adapters.md` 四段可粘贴提示词各加起止标记，可机器定位。
+- 规则本体未动：五条核心规则、块哈希 `fa0f991f…bc93`、四步流程、五个工具全部不变。
+
 ## v0.2.0 新增（同步上游 v1.1.0）
 
 - **可改性硬闸**：Join 之前先判屎山——绿（优先优化上游）/ 黄（只 Extend，隔适配层不碰内核）/ 红（**总分 ≥ 8 也不许 Join**，走 Fork/Build 并写 `不可复用原因：代码可改性`），附 7 步证据化检测（`references/repo-triage.md`）。
@@ -49,7 +58,9 @@ skills/reuse-before-build/          规则本体（规则文本与上游逐字�
   SKILL.md                         正典，含 RBB:INVARIANTS 冻结块
   localization.contract.json       块标记 + sha256 + 规则条数/锚点 + 声明格式
   references/                      检索手册 / 六维打分+可改性硬闸 / 贡献协议+分支纪律 / 接入口与薄适配层 / 宿主适配 / 中文完整版
+  prompt-digests.json              粘贴型提示词登记表（id / 版本 / sha256 / 字符数）
   scripts/repo_scan.py             无宿主时的 CLI 检索（退出码 0/2/3）
+  scripts/prompt_digest.py         粘贴提示词反查（--check / --verify / --digest / --emit）
   scripts/verify_localized.py      本地化校验器（四道闸）
 tests/test_offline.py              23 条离线自检（不需要 N.E.K.O SDK）
 tests/test_plugin_runtime.py       9 条运行时自检（跑在最小 SDK 桩上）
@@ -70,13 +81,13 @@ docs/guide.md                      插件面板里的使用说明
 - `config.example.toml` 承接可变默认值（不含 `[plugin]`），消掉「legacy runtime configuration」警告；
 - `tests/test_smoke.py`、`.vscode/settings.json`、`.vscode/tasks.json`、`pyproject.toml`、`.gitignore` 齐备；
 - `.github/workflows/{verify,release}.yml` 复用官方 `plugin-market-{verify,release}.yml@main`；
-- 发版 tag 必须与 `[plugin].version` 相同（当前 `0.2.0` → tag `v0.2.0`）。
+- 发版 tag 必须与 `[plugin].version` 相同（当前 `0.3.0` → tag `v0.3.0`）。
 
 ## 验过什么
 
-本版（v0.2.0）：
+本版（v0.3.0）：
 
-- **本地**：32 项 `unittest`（离线 + SDK 桩）、随包 skill **34** 项（新增 4 条文档级回归：可改性硬闸 / 适配层链接 / 分支纪律 / 不 Join 红与不 import 上游内部）、双正典 `verify_localized.py` 均 `PASS`（`SKILL.md` verbatim、`zh-guide.md` translated(zh)）。
+- **本地**：32 项 `unittest`（离线 + SDK 桩）、随包 skill **40** 项（新增 6 条提示词摘要回归：登记表与文档一致 / 命中 / 改一个词 NO MATCH / CRLF 容错 / 文档改了登记表没更新 FAIL / 未登记块被点名）、双正典 `verify_localized.py` 均 `PASS`（`SKILL.md` verbatim、`zh-guide.md` translated(zh)）。
 - **CI**：Verify / Release 的证据见本版 Release 的 `market-evidence.json`。
 
 v0.1.1 的历史记录（跑的是官方 `plugin-market-verify.yml` / `plugin-market-release.yml`，不是本地模拟）：

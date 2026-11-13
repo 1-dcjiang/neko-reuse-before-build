@@ -89,6 +89,7 @@
 
 ## 精简版（中文，约 300 字，可直接粘贴）
 
+<!-- RBB:PROMPT:BEGIN id=zh-condensed -->
 ```text
 在写任何新程序、脚本、库、插件或服务之前，你必须先搜索是否已经存在同类型或同一想法的公开项目，尤其是 GitHub 上的开源仓库。
 
@@ -102,9 +103,11 @@
 7. 不虚构仓库名、star 数、许可证；无法联网时输出可复制的检索清单并说明无法核实。不为刷贡献提交低价值 PR，不把私有代码贴到公开 issue。
 8. 每次输出必须包含：找到了什么（表格）、为什么选它、打算改动什么、被拒时的备选方案。
 ```
+<!-- RBB:PROMPT:END id=zh-condensed -->
 
 ## Condensed prompt (English, ~250 words)
 
+<!-- RBB:PROMPT:BEGIN id=en-condensed -->
 ```text
 Before writing any new program, script, library, plugin or service, search first for existing projects with the same purpose or idea — especially public GitHub repositories — and prefer contributing to one of them over creating a new one.
 
@@ -118,14 +121,29 @@ Rules:
 7. Never invent repo names, star counts or licenses. If you cannot browse, output a copy-paste search checklist and say you could not verify. Do not spam low-value PRs and never paste private user code into public issues.
 8. Every answer must include: what you found (table), why you chose it, what you will change, and the fallback if it is rejected.
 ```
+<!-- RBB:PROMPT:END id=en-condensed -->
 
 ## 严格版补充（团队/自动化代理用）
 
 需要硬性拦截时，把这条加到上面任一段的末尾：
 
+<!-- RBB:PROMPT:BEGIN id=strict-gate -->
 ```text
 硬门禁：在给出候选清单与首个可执行的贡献动作（issue 或 PR 草稿）之前，禁止输出完整的新项目脚手架代码。若检索到同名/同类仓库但选择新建，必须在回复开头用一行标明"不可复用原因：<许可/方向/维护状态/需求差异>"，否则视为违规。
 ```
+<!-- RBB:PROMPT:END id=strict-gate -->
+
+## 粘贴后的版本核对
+
+提示词一改，规则就散了，而且半年后没人记得自己装的是哪版。每段可粘贴文本都有 sha256 摘要，登记在 [prompt-digests.json](../prompt-digests.json)：
+
+```bash
+python scripts/prompt_digest.py --verify            # 登记表与 host-adapters 是否仍一致（改文档没更新摘要会 FAIL）
+python scripts/prompt_digest.py --check my.txt      # 你保存下来的提示词是哪个 id / 哪版；不认识就是 NO MATCH
+python scripts/prompt_digest.py --check -           # 直接粘贴进 stdin，Ctrl-D / Ctrl-Z 结束
+```
+
+摘要按「UTF-8、LF 换行、去每行行尾空白、去首尾空行」计算，所以 CRLF、尾随空格、复制时多出来的空行不会造成误判；改一个词就会变成 NO MATCH。查不到匹配时不要当成功：要么是提示词被改过，要么是从别的版本抄来的，重新拷一份再核对。
 
 ## 能力受限时
 
@@ -144,6 +162,7 @@ Rules:
 
 把下面这段交给任何会读文件的 AI，让它自己把 skill 装进自己的格式；它跑完校验才算完成。
 
+<!-- RBB:PROMPT:BEGIN id=localize-instruction -->
 ```text
 你现在要为本宿主本地化 reuse-before-build。按顺序做，每步都要有可见输出：
 
@@ -156,5 +175,6 @@ Rules:
 
 完成定义（DoD）：verify_localized.py 退出码为 0，且声明行存在（末尾追加版权行不影响判定）。缺一条都不算完成。
 ```
+<!-- RBB:PROMPT:END id=localize-instruction -->
 
 注意三条边界：**哈希只对逐字搬运生效**；翻译版转成"规则条数 1..5 + 每条规则锚点 + 六项全局锚点"校验，删条、改号、丢门禁都能抓住；但**保留关键词却把语气写软**（"应当考虑"替掉"必须"）抓不住，只能靠人读 `kept / changed` 那行。`--canonical` 只对包内两份参考件有效，对本地化副本会直接拒绝，别拿它当免检通道。

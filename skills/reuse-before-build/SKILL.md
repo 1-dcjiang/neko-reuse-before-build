@@ -136,6 +136,8 @@ Four ways to install, plus per-host rule-file paths and paste-ready prompts (Eng
 
 See [references/host-adapters.md](references/host-adapters.md) for the full matrix and the exact rule-file name per host.
 
+The paste-ready prompts in that file are the most fragile form of this skill: one edited word and the rules silently change. Each block carries `<!-- RBB:PROMPT:BEGIN id=… -->` anchors and its SHA-256 is registered in [prompt-digests.json](prompt-digests.json). After pasting one into a host, save the text and run `python scripts/prompt_digest.py --check saved.txt` — it prints `MATCH id=… version=…`, or `NO MATCH` when the copy has drifted. `--verify` keeps the registry and the markdown from diverging, so a v1.2.0 prompt is always identifiable as v1.2.0.
+
 ## Self-localization: adapt the packaging, never the rules
 
 A host may expect a different shape than this file ships in — another frontmatter schema, a single flat system prompt, a JSON tool definition, a different language, a plugin manifest, a shorter context budget. Adapt the packaging on first use; do not adapt the rules.
