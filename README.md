@@ -10,29 +10,9 @@ N.E.K.O 里的 AI 接到「帮我做个 X」时，最容易干的事是直接写
 
 规则本体不是插件作者的一句话，而是随包冻结的一段文本：带 `<!-- RBB:INVARIANTS -->` 标记和 sha256。删条、改编号、丢门禁会被随包校验器当场报错——对 AI，也对维护这个插件的人。
 
-## v0.3.1 修复（代码复查）
+## 版本记录
 
-- **交付检查不再误伤 Join 结论**：`check_deliverable` 原先只要全文出现 `Build`/`新建`（备选段几乎必然提到）就强制要 `不可复用原因` 行；现改为优先按「结论：X」行判定，无结论行时仅在全文结论词唯一时才套门禁，并提示补结论行。新增 3 条回归。
-- **登记表坏结构不再抛 traceback**：`prompt_digest.py` 缺 `id` / `versions` 非数组 / id 重复 / `prompts` 非数组 → `FAIL` + 退出码 2（与文档一致），新增 1 条覆盖四种坏表的回归。
-- **入口参数防御**：`rbb_scan` 的 `stars`/`limit` 被传成非数字时回默认值而不是 `ValueError`；启动哈希任务保留引用，避免被 GC。
-- 同步主仓 v1.2.1 的 E741 清理，规则本体与块哈希不变。
-
-## v0.3.0 新增（同步上游 v1.2.0）
-
-- **粘贴型提示词带 sha256**：聊天式 AI 只能吃「一段复制粘贴的提示词」，而这段文字最容易在复制、精简、翻译中静默走样。新增 `prompt-digests.json`（四段提示词的 `id` / 版本 / sha256 / 字符数，旧版本留档）与 `scripts/prompt_digest.py`：
-  - `--check <文件|->`：反查这段提示词是哪个 id、哪一版；改过就 `NO MATCH` + 退出码 1。
-  - `--verify`：登记表与 `references/host-adapters.md` 是否一致，发版前跑。
-  - 摘要按「UTF-8、LF、去行尾空白、去首尾空行」计算：CRLF、尾随空格、复制多出的空行不误报，真改词必然不匹配。
-- **`RBB:PROMPT` 锚点**：`host-adapters.md` 四段可粘贴提示词各加起止标记，可机器定位。
-- 规则本体未动：五条核心规则、块哈希 `fa0f991f…bc93`、四步流程、五个工具全部不变。
-
-## v0.2.0 新增（同步上游 v1.1.0）
-
-- **可改性硬闸**：Join 之前先判屎山——绿（优先优化上游）/ 黄（只 Extend，隔适配层不碰内核）/ 红（**总分 ≥ 8 也不许 Join**，走 Fork/Build 并写 `不可复用原因：代码可改性`），附 7 步证据化检测（`references/repo-triage.md`）。
-- **稳定接入口 + 薄适配层**：新增 `references/integration-seam.md`——接入口按稳定性排序（插件/钩子 > 公开 API > CLI/配置 > 事件，私有函数与 monkey-patch 不作交付），所有上游调用收进一个约 ≤150 行只做翻译的适配层，配契约测试与四条验收。
-- **分支纪律**：禁止直推 `main`/`master`（自己的仓库也一样）；「主干有可优化的地方」只改变动哪些文件，不改这条规则，修主干同样走分支 + PR。
-
-三条都在不变块**之外**，五条核心规则与块哈希（`fa0f991f…bc93`）不变。
+完整修复与新增记录见 [CHANGELOG.md](CHANGELOG.md)。当前 `0.3.2` 修的是复查里的五项：`rbb_verify` 路径收敛、`gh` 参数注入、配置失败可见、默认值去重与布尔显式解析、录好的 `gh` JSON 契约测试。
 
 ## 五个工具
 
@@ -57,7 +37,7 @@ N.E.K.O 里的 AI 接到「帮我做个 X」时，最容易干的事是直接写
 
 ```
 plugin.toml                        清单（id / entry / 设置项 / ui guide）
-config.example.toml                可复制的运行配置示例（可变默认值放这里，不放 plugin.toml）
+config.example.toml                可复制的运行配置示例（`[settings]` 默认值只在 plugin.toml 写一份）
 pyproject.toml                     最小工程声明（市场 CLI 的可选件，补上可消掉一条警告）
 __init__.py                        插件类：5 个 @llm_tool + 生命周期 + 自检 action
 rbb_core.py                        宿主无关纯逻辑（检索/格式检查/配置解析/校验包装），可离线测试
@@ -69,9 +49,11 @@ skills/reuse-before-build/          规则本体（规则文本与上游逐字�
   scripts/repo_scan.py             无宿主时的 CLI 检索（退出码 0/2/3）
   scripts/prompt_digest.py         粘贴提示词反查（--check / --verify / --digest / --emit）
   scripts/verify_localized.py      本地化校验器（四道闸）
-tests/test_offline.py              23 条离线自检（不需要 N.E.K.O SDK）
+tests/test_offline.py              37 条离线自检（不需要 N.E.K.O SDK）
 tests/test_plugin_runtime.py       9 条运行时自检（跑在最小 SDK 桩上）
 tests/test_smoke.py                市场模板要求的清单/入口 smoke test（函数式，pytest 收集 3 条）
+tests/fixtures/gh_search_repos.json 录好的 gh 检索输出（契约测试用）
+CHANGELOG.md                       版本修复记录
 .vscode/                           市场模板要求的 settings.json / tasks.json
 docs/guide.md                      插件面板里的使用说明
 .github/workflows/                 managed-template（Verify / Release）
@@ -85,16 +67,17 @@ docs/guide.md                      插件面板里的使用说明
 仓库按 N.E.K.O 市场 CLI 的 `check -r`（严格模式）自查通过所要求的脚手架：
 
 - `plugin.toml` 符合 `[plugin]` 允许键集；`entry` 指向 `plugin.plugins.reuse_before_build`；
-- `config.example.toml` 承接可变默认值（不含 `[plugin]`），消掉「legacy runtime configuration」警告；
+- `config.example.toml` 承接运行配置模板（不含 `[plugin]`），`[settings]` 默认值不重复抄写，消掉「legacy runtime configuration」警告；
 - `tests/test_smoke.py`、`.vscode/settings.json`、`.vscode/tasks.json`、`pyproject.toml`、`.gitignore` 齐备；
 - `.github/workflows/{verify,release}.yml` 复用官方 `plugin-market-{verify,release}.yml@main`；
-- 发版 tag 必须与 `[plugin].version` 相同（当前 `0.3.1` → tag `v0.3.1`）。
+- 发版 tag 必须与 `[plugin].version` 相同（当前 `0.3.2` → tag `v0.3.2`）。
 
 ## 验过什么
 
-本版（v0.3.1）：
+本版（v0.3.2）：
 
-- **本地**：35 项 `unittest`（离线 + SDK 桩，新增 3 条结论判定回归）、随包 skill **41** 项（新增 6 条提示词摘要回归 + 1 条坏登记表容错：登记表与文档一致 / 命中 / 改一个词 NO MATCH / CRLF 容错 / 文档改了登记表没更新 FAIL / 未登记块被点名）、双正典 `verify_localized.py` 均 `PASS`（`SKILL.md` verbatim、`zh-guide.md` translated(zh)）。
+- **本地**：`python -m pytest tests` **49 passed**（离线 37 + SDK 桩 9 + 市场 smoke 3）；`ruff check .` 全绿；官方 `check -r` 通过（`tests=passed`、`payload_hash_verified=True`）。
+- **随包 skill**：`verify_localized.py` 对 `SKILL.md` 输出 `PASS verbatim`，`zh-guide.md` 输出 `translated(zh)`；规则块哈希 `fa0f991f…bc93` 未变。
 - **CI**：Verify / Release 的证据见本版 Release 的 `market-evidence.json`。
 
 v0.1.1 的历史记录（跑的是官方 `plugin-market-verify.yml` / `plugin-market-release.yml`，不是本地模拟）：
