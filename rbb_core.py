@@ -20,6 +20,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import time
 import tomllib
 from typing import Any
@@ -48,12 +49,12 @@ VERIFY_SCRIPT = os.path.join(SKILL_DIR, "scripts", "verify_localized.py")
 SKILL_MD = os.path.join(SKILL_DIR, "SKILL.md")
 PLUGIN_TOML = os.path.join(HERE, "plugin.toml")
 
-# gh 只允许这些文件名：配置项 gh_binary 不能指向任意可执行文件。
+# gh 只允许这两个文件名：配置项和显式调用都不能指向 .bat/.cmd 或任意程序。
 GH_NAMES = {"gh", "gh.exe"}
-GH_EXEC_NAMES = {"gh", "gh.exe", "gh.bat", "gh.cmd"}
 _SECRET_RX = re.compile(
     r"(?i)(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|"
-    r"(?:token|password|secret)\s*[:=]\s*\S+)"
+    r"bearer\s+[A-Za-z0-9._~+/=-]{8,}|"
+    r"(?:access[_-]?token|api[_-]?key|authorization|token|password|secret)\s*[:=]\s*\S+)"
 )
 
 
@@ -76,16 +77,13 @@ def normalize_gh_binary(value: object) -> str:
 
 
 def resolve_gh_executable(value: object) -> str:
-    """允许测试/库调用注入自定义安装路径，但文件名必须是 gh / gh.exe / gh.bat / gh.cmd。
+    """只接受字面量 gh / gh.exe；.bat/.cmd 会经 cmd.exe 解释参数，直接拒绝。
 
     返回空串表示值非法，调用方把它当成「gh 不可用」，而不是悄悄换成另一个程序。
     """
     raw = str(value or "").strip()
-    if not raw:
-        return ""
-    base = raw.replace("\\", "/").rsplit("/", 1)[-1].lower()
-    if base in GH_EXEC_NAMES:
-        return raw
+    if raw.lower() in GH_NAMES:
+        return raw.lower()
     return ""
 
 # 紧急降级值：不是「默认值」。真正的默认值只在 plugin.toml 的 [settings] 写一份；
@@ -186,13 +184,13 @@ def default_since(days: int = 365, today: dt.date | None = None) -> str:
     return (today - dt.timedelta(days=max(1, int(days)))).isoformat()
 
 
-def activity_points(pushed_at: str) -> int:
-    if not pushed_at:
+def activity_points(pushed_at: object) -> int:
+    if not isinstance(pushed_at, str) or not pushed_at:
         return 0
     try:
         pushed = dt.datetime.fromisoformat(pushed_at.replace("Z", "+00:00"))
         days = (dt.datetime.now(dt.timezone.utc) - pushed).days
-    except (TypeError, ValueError, OverflowError):
+    except (AttributeError, TypeError, ValueError, OverflowError):
         return 0
     if days <= 90:
         return 2
@@ -245,7 +243,7 @@ def render_table(rows: list[dict]) -> str:
 
 # ────────────────────────── gh 调用 ──────────────────────────
 
-def _gh(gh_binary: str, args: list[str], timeout: int) -> subprocess.CompletedProcess:
+def _gh(gh_binary: str, args: list[str], timeout: float) -> subprocess.CompletedProcess:
     return subprocess.run(
         [gh_binary, *args],
         capture_output=True,
@@ -268,7 +266,7 @@ def parse_search_output(out: str) -> list[dict]:
     try:
         parsed = json.loads(text)
     except ValueError as exc:
-        raise RuntimeError(f"gh 输出不是 JSON（{exc}）：{text[:200]}") from None
+        raise RuntimeError(f"gh 输出不是 JSON（{exc}）：{redact_text(text, 200)}") from None
     if isinstance(parsed, dict):
         return [parsed]
     if isinstance(parsed, list):
@@ -279,7 +277,7 @@ def parse_search_output(out: str) -> list[dict]:
 def gh_json(gh_binary: str, args: list[str], timeout: float = 30) -> list[dict]:
     exe = resolve_gh_executable(gh_binary)
     if not exe:
-        raise RuntimeError("gh_binary 非法：只允许 gh / gh.exe / gh.bat / gh.cmd")
+        raise RuntimeError("gh_binary 非法：只允许 gh / gh.exe")
     try:
         proc = _gh(exe, args, timeout)
     except FileNotFoundError:
@@ -297,7 +295,7 @@ def auth_ok(gh_binary: str = "gh", timeout: float = 30) -> tuple[bool, str]:
     """只查检索要用的那一个 host：`gh auth status` 在任一已配置 host 掉线时会整体非零。"""
     exe = resolve_gh_executable(gh_binary)
     if not exe:
-        return False, "gh_binary 非法：只允许 gh / gh.exe / gh.bat / gh.cmd"
+        return False, "gh_binary 非法：只允许 gh / gh.exe"
     host = os.environ.get("GH_HOST") or "github.com"
     try:
         proc = _gh(exe, ["auth", "status", "-h", host], timeout)
@@ -329,6 +327,31 @@ def normalize_search_row(row: dict, keyword: str) -> dict:
     row["full_name"] = f"{owner}/{row.get('name', '')}" if owner else row.get("name", "")
     row["matched_keyword"] = keyword
     return row
+
+
+def _as_int(value: object, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def normalize_scan_params(
+    stars: object, limit: object, updated_since: object, updated_days: object
+) -> tuple[int, int, str, str]:
+    """夹取直调参数：stars / limit / updated_days 有上限，updated_since 必须可解析。"""
+    stars_n = max(0, min(1_000_000, _as_int(stars, 50)))
+    limit_n = max(1, min(10, _as_int(limit, 6)))
+    days_n = max(1, min(3650, _as_int(updated_days, 365)))
+    raw_since = str(updated_since or "").strip()
+    note = ""
+    if raw_since:
+        try:
+            dt.date.fromisoformat(raw_since)
+        except ValueError:
+            note = f"updated_since={raw_since!r} 不是 YYYY-MM-DD，已回退到最近 {days_n} 天"
+            raw_since = ""
+    return stars_n, limit_n, raw_since or default_since(days_n), note
 
 
 def _scan_one(kw: str, gh_binary: str, stars: int, updated_since: str,
@@ -370,7 +393,7 @@ def search_candidates(
     exe = resolve_gh_executable(gh_binary)
     if not exe:
         result.update(code=2,
-                      reason="gh_binary 非法：只允许 gh / gh.exe / gh.bat / gh.cmd。",
+                      reason="gh_binary 非法：只允许 gh / gh.exe。",
                       hint=AUTH_HINT)
         return result
     if not (os.path.isabs(exe) and os.path.exists(exe)) and not shutil.which(exe):
@@ -384,12 +407,24 @@ def search_candidates(
     except (TypeError, ValueError):
         total_budget = 30
     deadline = time.monotonic() + total_budget
-    ok, why = auth_ok(exe, total_budget)
+    # 登录检查最多拿 40% 预算（上限 10s），剩下的留给关键词；否则 auth 一慢，
+    # 后面每个关键词都只剩 0.x 秒，会被误报成 code=3「gh 坏了」。
+    auth_budget = max(2.0, min(10.0, total_budget * 0.4))
+    ok, why = auth_ok(exe, auth_budget)
     if not ok:
         result.update(code=2, reason=f"gh 未就绪：{why}", hint=AUTH_HINT)
         return result
+    if deadline - time.monotonic() <= 0.2:
+        result.update(
+            code=2,
+            reason=f"`gh auth status` 用完了总时限（{total_budget}s），还没开始检索关键词。",
+            hint=AUTH_HINT,
+        )
+        return result
 
-    since = (updated_since or "").strip() or default_since(updated_days)
+    stars_n, limit_n, since, note = normalize_scan_params(stars, limit, updated_since, updated_days)
+    if note:
+        result["note"] = note
     merged: dict[str, dict] = {}
     failed: list[str] = []
     errors: list[str] = []
@@ -399,7 +434,7 @@ def search_candidates(
             failed.append(kw)
             errors.append(f"{kw}: 总时限 {total_budget}s 已用完")
             continue
-        rows, err = _scan_one(kw, exe, int(stars), since, int(limit), min(float(total_budget), remaining))
+        rows, err = _scan_one(kw, exe, stars_n, since, limit_n, min(float(total_budget), remaining))
         if err:
             failed.append(kw)
             errors.append(f"{kw}: {err}")
@@ -429,20 +464,22 @@ def search_candidates(
     result["rows"] = rows
     result["table"] = render_table(rows) if rows else ""
     result["failed"] = failed
-    result["stars"], result["updated_since"], result["limit"] = int(stars), since, int(limit)
+    result["stars"], result["updated_since"], result["limit"] = stars_n, since, limit_n
 
+    notes = [note] if note else []
     if failed and len(failed) == len(clean):
         result.update(code=3,
                       reason="全部关键词检索失败：" + "; ".join(errors)[:600],
                       hint=FAIL_HINT)
         return result
     if failed:
-        result["note"] = f"{len(failed)}/{len(clean)} 个关键词检索失败，结果可能偏少。"
+        notes.append(f"{len(failed)}/{len(clean)} 个关键词检索失败，结果可能偏少。")
     elif not rows:
-        result["note"] = EMPTY_HINT
+        notes.append(EMPTY_HINT)
     else:
-        result["note"] = (f"共 {len(rows)} 个去重候选（{len(clean)} 个关键词）。下一步：按 "
-                          "references/repo-triage.md 读每个仓库的 CONTRIBUTING 与最近合并的 PR，做六维打分。")
+        notes.append(f"共 {len(rows)} 个去重候选（{len(clean)} 个关键词）。下一步：按 "
+                     "references/repo-triage.md 读每个仓库的 CONTRIBUTING 与最近合并的 PR，做六维打分。")
+    result["note"] = "；".join(notes)
     result["ok"] = True
     return result
 
@@ -554,9 +591,23 @@ def core_rules_block() -> str:
     return max(candidates, key=lambda c: (len(re.findall(r"^(?:\d+)\.\s", c, re.M)), -candidates.index(c)))
 
 
-def canonical_hash(python_exe: str = "", timeout: float = 60) -> tuple[str, str]:
+def resolve_python(python_exe: str = "") -> str:
+    """优先用宿主自己的解释器；Windows 只有 py 启动器时也能找到。"""
+    raw = str(python_exe or "").strip()
+    if raw:
+        return raw
+    if sys.executable and os.path.isfile(sys.executable):
+        return sys.executable
+    for name in ("python", "python3", "py"):
+        found = shutil.which(name)
+        if found:
+            return found
+    return "python"
+
+
+def canonical_hash(python_exe: str = "", timeout: float = 30) -> tuple[str, str]:
     """跑随包校验器 --print-hash，返回 (hash, 错误信息)。"""
-    py = python_exe or shutil.which("python") or "python"
+    py = resolve_python(python_exe)
     try:
         proc = subprocess.run(
             [py, "-X", "utf8", VERIFY_SCRIPT, "--print-hash", SKILL_MD],
@@ -569,7 +620,7 @@ def canonical_hash(python_exe: str = "", timeout: float = 60) -> tuple[str, str]
         return "", f"规则哈希计算失败：{redact_text(exc)}"
     if proc.returncode != 0:
         return "", redact_text((proc.stderr or proc.stdout).strip())
-    return proc.stdout.strip(), ""
+    return redact_text(proc.stdout.strip(), 200), ""
 
 
 def resolve_localized_path(target: str) -> tuple[str, str]:
@@ -598,7 +649,7 @@ def resolve_localized_path(target: str) -> tuple[str, str]:
 
 
 def verify_localized(target: str, python_exe: str = "",
-                     extra: list[str] | None = None, timeout: float = 60) -> dict[str, Any]:
+                     extra: list[str] | None = None, timeout: float = 30) -> dict[str, Any]:
     """校验一份本地化副本；rc=0 才算保住规则。路径、参数与输出都做收敛。
 
     `extra` 只允许 `--quiet`：`--canonical` 等能跳过声明检查的开关不能由模型侧注入。
@@ -607,7 +658,7 @@ def verify_localized(target: str, python_exe: str = "",
     if path_err:
         return {"rc": 2, "out": "", "err": path_err[:400]}
     safe_extra = [arg for arg in (extra or []) if arg == "--quiet"]
-    py = python_exe or shutil.which("python") or "python"
+    py = resolve_python(python_exe)
     args = [py, "-X", "utf8", VERIFY_SCRIPT, real, *safe_extra]
     try:
         proc = subprocess.run(
@@ -618,4 +669,8 @@ def verify_localized(target: str, python_exe: str = "",
         return {"rc": -1, "out": "", "err": f"校验超时（>{timeout:g}s）"}
     except OSError as exc:
         return {"rc": -1, "out": "", "err": f"找不到 Python 解释器或无法启动：{redact_text(exc, 200)}"}
-    return {"rc": proc.returncode, "out": proc.stdout.strip()[:800], "err": redact_text(proc.stderr.strip(), 400)}
+    return {
+        "rc": proc.returncode,
+        "out": redact_text(proc.stdout.strip(), 800),
+        "err": redact_text(proc.stderr.strip(), 400),
+    }

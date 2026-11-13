@@ -12,7 +12,7 @@ N.E.K.O 里的 AI 接到「帮我做个 X」时，最容易干的事是直接写
 
 ## 版本记录
 
-完整修复与新增记录见 [CHANGELOG.md](CHANGELOG.md)。`0.3.2` 修的是复查里的五项：`rbb_verify` 路径收敛、`gh` 参数注入、配置失败可见、默认值去重与布尔显式解析、录好的 `gh` JSON 契约测试；`0.3.3` 清理 README 历史段并把市场短描述压到 255 字上限；`0.3.4` 按第二轮复查修异常穿透、检索总预算、`gh_binary` 收敛、`extra` 白名单、结论词边界、空键去重、无时区时间与 stderr 脱敏。
+完整修复与新增记录见 [CHANGELOG.md](CHANGELOG.md)。`0.3.2` 修的是复查里的五项：`rbb_verify` 路径收敛、`gh` 参数注入、配置失败可见、默认值去重与布尔显式解析、录好的 `gh` JSON 契约测试；`0.3.3` 清理 README 历史段并把市场短描述压到 255 字上限；`0.3.4` 按第二轮复查修异常穿透、检索总预算、`gh_binary` 收敛、`extra` 白名单、结论词边界、空键去重、无时区时间与 stderr 脱敏；`0.3.5` 按第三轮复查去掉 `.bat/.cmd`、给登录检查留预算、补齐 stdout/Bearer 脱敏、夹取直调参数并兼容 Windows `py` 启动器。
 
 ## 五个工具
 
@@ -49,7 +49,7 @@ skills/reuse-before-build/          规则本体（规则文本与上游逐字�
   scripts/repo_scan.py             无宿主时的 CLI 检索（退出码 0/2/3）
   scripts/prompt_digest.py         粘贴提示词反查（--check / --verify / --digest / --emit）
   scripts/verify_localized.py      本地化校验器（四道闸）
-tests/test_offline.py              47 条离线自检（不需要 N.E.K.O SDK）
+tests/test_offline.py              54 条离线自检（不需要 N.E.K.O SDK）
 tests/test_plugin_runtime.py       9 条运行时自检（跑在最小 SDK 桩上）
 tests/test_smoke.py                市场模板要求的清单/入口 smoke test（函数式，pytest 收集 3 条）
 tests/fixtures/gh_search_repos.json 录好的 gh 检索输出（契约测试用）
@@ -70,13 +70,13 @@ docs/guide.md                      插件面板里的使用说明
 - `config.example.toml` 承接运行配置模板（不含 `[plugin]`），`[settings]` 默认值不重复抄写，消掉「legacy runtime configuration」警告；
 - `tests/test_smoke.py`、`.vscode/settings.json`、`.vscode/tasks.json`、`pyproject.toml`、`.gitignore` 齐备；
 - `.github/workflows/{verify,release}.yml` 复用官方 `plugin-market-{verify,release}.yml@main`；
-- 发版 tag 必须与 `[plugin].version` 相同（当前 `0.3.4` → tag `v0.3.4`）。
+- 发版 tag 必须与 `[plugin].version` 相同（当前 `0.3.5` → tag `v0.3.5`）。
 
 ## 验过什么
 
-本版（v0.3.4）：
+本版（v0.3.5）：
 
-- **本地**：`python -m pytest tests` **59 passed**；`ruff check .` 全绿；官方 `check -r` 通过（`tests=passed`、`payload_hash_verified=True`）。
+- **本地**：`python -m pytest tests` **66 passed**（离线 54 + SDK 桩 9 + 市场 smoke 3）；`ruff check .` 全绿；官方 `check -r` 通过（`tests=passed`、`payload_hash_verified=True`）。
 - **随包 skill**：`verify_localized.py` 对 `SKILL.md` 输出 `PASS verbatim`，`zh-guide.md` 输出 `translated(zh)`；规则块哈希 `fa0f991f…bc93` 未变。
 - **CI**：Verify / Release 的证据见本版 Release 的 `market-evidence.json`。
 

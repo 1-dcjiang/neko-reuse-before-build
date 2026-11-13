@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.5 — 2026-11-14
+
+按第三轮复查（8.3 / 10）补的三处 + 新问题：
+
+- **`gh` 白名单只剩 `gh` / `gh.exe`**：`resolve_gh_executable` 不再接受 `.bat` / `.cmd` 或任意路径；Windows 下 `.bat` 会被 `cmd.exe` 接管，关键词里的 `&`、`%` 可能被解释。配置与直调两条路径现在用同一份白名单。
+- **登录检查不再吃光总预算**：`auth_ok` 只拿 `min(10s, 总预算 × 40%)`，剩余时间留给关键词；auth 超时/失败统一返回 `code=2`，并明确写「`gh auth status` 用完了总时限」，不再把超时误报成 `code=3` 的「gh 坏了」。
+- **脱敏补齐**：`parse_search_output` 的坏 JSON 片段、`verify_localized` 的 stdout、`canonical_hash` 的 stdout 都过 `redact_text`；正则新增 `Bearer`、`api_key`、`access_token`、`Authorization`。
+- **直调参数夹取**：`stars` 夹到 0..1,000,000，`limit` 夹到 1..10，`updated_days` 夹到 1..3650；`updated_since` 必须是 `YYYY-MM-DD`，非法时回退最近 N 天并写进 `note`。
+- **`pushedAt` 非字符串**：`activity_points` 先判 `isinstance(str)`，并捕获 `AttributeError`，数字/列表不再让 `.replace` 崩。
+- **Windows 只有 `py` 启动器**：`resolve_python` 按 `sys.executable` → `python` → `python3` → `py` 的顺序找解释器，`canonical_hash` / `verify_localized` 共用。
+- **随包 CLI**：同一套参数校验（`--stars` / `--limit` / `--updated-since`）与脱敏；主仓 `scripts/repo_scan.py` 同步。
+- 测试：66 passed（离线 54 + SDK 桩 9 + 市场 smoke 3），`ruff check .` 全绿。
+- 规则本体、契约哈希 `fa0f991f…bc93`、四段提示词 sha256 未动。
+
 ## 0.3.4 — 2026-11-14
 
 按第二轮第三方复查（8 条问题 + 3 条优先项）修的加固：

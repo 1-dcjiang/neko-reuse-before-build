@@ -47,7 +47,8 @@ FAIL_HINT = (
 )
 _SECRET_RX = re.compile(
     r"(?i)(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|"
-    r"(?:token|password|secret)\s*[:=]\s*\S+)"
+    r"bearer\s+[A-Za-z0-9._~+/=-]{8,}|"
+    r"(?:access[_-]?token|api[_-]?key|authorization|token|password|secret)\s*[:=]\s*\S+)"
 )
 
 
@@ -88,7 +89,7 @@ def parse_search_output(out: str) -> list[dict]:
     try:
         parsed = json.loads(text)
     except ValueError as exc:
-        raise RuntimeError(f"gh 输出不是 JSON（{exc}）：{text[:200]}") from None
+        raise RuntimeError(f"gh 输出不是 JSON（{exc}）：{redact_text(text, 200)}") from None
     if isinstance(parsed, dict):
         return [parsed]
     if isinstance(parsed, list):
@@ -139,13 +140,13 @@ def scan(keyword: str, stars: int, updated_since: str, limit: int) -> tuple[list
     return rows, True
 
 
-def activity_points(pushed_at: str) -> int:
-    if not pushed_at:
+def activity_points(pushed_at: object) -> int:
+    if not isinstance(pushed_at, str) or not pushed_at:
         return 0
     try:
         pushed = dt.datetime.fromisoformat(pushed_at.replace("Z", "+00:00"))
         days = (dt.datetime.now(dt.timezone.utc) - pushed).days
-    except (TypeError, ValueError, OverflowError):
+    except (AttributeError, TypeError, ValueError, OverflowError):
         return 0
     if days <= 90:
         return 2
@@ -216,16 +217,45 @@ def render_table(rows: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _stars_arg(value: str) -> int:
+    try:
+        n = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("--stars 必须是整数") from exc
+    if not 0 <= n <= 1_000_000:
+        raise argparse.ArgumentTypeError("--stars 必须在 0..1000000")
+    return n
+
+
+def _limit_arg(value: str) -> int:
+    try:
+        n = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("--limit 必须是整数") from exc
+    if not 1 <= n <= 10:
+        raise argparse.ArgumentTypeError("--limit 必须在 1..10")
+    return n
+
+
+def _since_arg(value: str) -> str:
+    try:
+        dt.date.fromisoformat(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("--updated-since 必须是 YYYY-MM-DD") from exc
+    return value
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="GitHub 候选仓库粗筛（reuse-before-build）")
     parser.add_argument("keywords", nargs="+", help="一个或多个检索串（英文效果最好）")
-    parser.add_argument("--stars", type=int, default=100, help="星数下限，默认 100")
+    parser.add_argument("--stars", type=_stars_arg, default=100, help="星数下限，默认 100")
     parser.add_argument(
         "--updated-since",
+        type=_since_arg,
         default=default_since(),
         help="最近推送日期下限，默认一年前（YYYY-MM-DD）",
     )
-    parser.add_argument("--limit", type=int, default=8, help="每个关键词返回条数，默认 8")
+    parser.add_argument("--limit", type=_limit_arg, default=8, help="每个关键词返回条数，默认 8")
     parser.add_argument("--md-out", default="", help="把 Markdown 表格写入该文件")
     parser.add_argument("--json-out", default="", help="把原始结果写入该 JSON 文件")
     args = parser.parse_args()
