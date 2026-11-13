@@ -380,5 +380,108 @@ class TestDocs(unittest.TestCase):
         self.assertIn("不让业务代码 import 上游内部路径", zh)
 
 
+class TestPromptDigests(unittest.TestCase):
+    """粘贴型提示词的版本摘要：登记表不能和文档分叉，反查不能把改过的文本当好版本。"""
+
+    SCRIPT = os.path.join(ROOT, "scripts", "prompt_digest.py")
+    HOST_ADAPTERS = os.path.join(ROOT, "references", "host-adapters.md")
+    REGISTRY = os.path.join(ROOT, "prompt-digests.json")
+
+    def read(self, path):
+        with open(path, encoding="utf-8") as fh:
+            return fh.read()
+
+    def run_digest(self, *args):
+        return subprocess.run(
+            [sys.executable, "-X", "utf8", self.SCRIPT, *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=60,
+            check=False,
+        )
+
+    def block_text(self, pid, text=None):
+        text = text if text is not None else self.read(self.HOST_ADAPTERS)
+        m = re.search(r"id=" + re.escape(pid) + r" -->\n```text\n(.*?)\n```", text, re.S)
+        if not m:
+            self.fail(f"文档里没有这段提示词：{pid}")
+        return m.group(1)
+
+    def make_tree(self, adapters_text):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        os.makedirs(os.path.join(tmp, "scripts"))
+        os.makedirs(os.path.join(tmp, "references"))
+        shutil.copy2(self.SCRIPT, os.path.join(tmp, "scripts", "prompt_digest.py"))
+        shutil.copy2(self.REGISTRY, os.path.join(tmp, "prompt-digests.json"))
+        with open(os.path.join(tmp, "references", "host-adapters.md"), "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(adapters_text)
+        return os.path.join(tmp, "scripts", "prompt_digest.py")
+
+    def run_verify(self, script):
+        return subprocess.run(
+            [sys.executable, "-X", "utf8", script, "--verify"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=60, check=False,
+        )
+
+    def test_registry_matches_the_shipped_prompts(self):
+        p = self.run_digest("--verify")
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        for pid in ("zh-condensed", "en-condensed", "strict-gate", "localize-instruction"):
+            self.assertIn(pid, p.stdout)
+
+    def test_check_identifies_a_shipped_prompt(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        path = os.path.join(tmp, "en.txt")
+        with open(path, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(self.block_text("en-condensed"))
+        p = self.run_digest("--check", path)
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn("MATCH  id=en-condensed", p.stdout)
+
+    def test_check_rejects_a_single_word_drift(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        body = self.block_text("zh-condensed")
+        drifted = body.replace("先假设", "应当假设", 1)
+        self.assertNotEqual(drifted, body)
+        path = os.path.join(tmp, "drift.txt")
+        with open(path, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(drifted)
+        p = self.run_digest("--check", path)
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("NO MATCH", p.stdout)
+
+    def test_check_tolerates_crlf_and_trailing_whitespace(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        path = os.path.join(tmp, "crlf.txt")
+        with open(path, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(self.block_text("zh-condensed").replace("\n", "  \r\n") + "\r\n\r\n")
+        p = self.run_digest("--check", path)
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn("MATCH  id=zh-condensed", p.stdout)
+
+    def test_verify_catches_a_doc_change_without_a_registry_update(self):
+        script = self.make_tree(self.read(self.HOST_ADAPTERS).replace("先假设", "应当假设", 1))
+        p = self.run_verify(script)
+        self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
+        self.assertIn("FAIL  zh-condensed", p.stderr)
+
+    def test_unregistered_prompt_block_is_flagged(self):
+        extra = (
+            "\n## 例子\n\n<!-- RBB:PROMPT:BEGIN id=not-registered -->\n"
+            "```text\n随手写的一段\n```\n<!-- RBB:PROMPT:END id=not-registered -->\n"
+        )
+        script = self.make_tree(self.read(self.HOST_ADAPTERS) + extra)
+        p = self.run_verify(script)
+        self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
+        self.assertIn("not-registered", p.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

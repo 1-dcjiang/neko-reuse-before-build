@@ -2,9 +2,9 @@
 id = "reuse_before_build"
 name = "先搜后建"
 description = "让 AI 在写任何新程序、脚本、库、插件或服务之前，先检索已有的公开实现（尤其 GitHub 仓库），优先加入上游成为贡献者，而不是从零重造。插件把规则本体、检索工具、交付物机械检查与本地化校验一起装进 N.E.K.O：规则段带哈希冻结块，删条/改号/丢门禁会被校验器当场报错。"
-short_description = "先搜后建：写新程序前先搜 GitHub 同类项目并优先贡献上游，而不是重造。提供规则本体（命中即返回核心规则与四步流程）、GitHub 候选检索（gh CLI，区分「检索成功 0 命中」与「检索失败」，失败绝不等于没有同类）、交付物机械检查（四段格式 + 不可复用原因门禁行）、本地化校验（不变块哈希 + 规则条数 1..5 + 逐条锚点 + 声明行）。v0.2.0 同步上游 v1.1.0：新增可改性硬闸（屎山三档，红档禁止 Join）、稳定接入口薄适配层（integration-seam.md）、分支纪律（不直推默认分支）；适配 N.E.K.O 4.1.0 插件规范，规则正典逐字冻结（sha256 fa0f991f），技能本体随包分发自检，不做任何公开写操作。"
+short_description = "先搜后建：写新程序前先搜 GitHub 同类项目并优先贡献上游，而不是重造。提供规则本体（命中即返回核心规则与四步流程）、GitHub 候选检索（gh CLI，区分「检索成功 0 命中」与「检索失败」，失败绝不等于没有同类）、交付物机械检查（四段格式 + 不可复用原因门禁行）、本地化校验（不变块哈希 + 规则条数 1..5 + 逐条锚点 + 声明行）。v0.3.0 同步上游 v1.2.0：新增可改性硬闸（屎山三档，红档禁止 Join）、稳定接入口薄适配层（integration-seam.md）、分支纪律（不直推默认分支），以及粘贴型提示词的 sha256 版本核对（prompt-digests.json + prompt_digest.py）；适配 N.E.K.O 4.1.0 插件规范，规则正典逐字冻结（sha256 fa0f991f），技能本体随包分发自检，不做任何公开写操作。"
 keywords = ["先搜后建", "复用优先", "别重复造轮子", "重复造轮子", "有没有现成的", "有没有开源", "从零实现", "帮我写一个工具", "新项目", "造轮子", "检索同类项目", "GitHub 搜索", "贡献上游", "向上游提 PR", "开源贡献", "不可复用原因", "reuse", "reinvent the wheel", "existing implementation", "open source alternative", "upstream", "contribute", "pull request", "scaffold", "from scratch", "not reusable because"]
-version = "0.2.0"
+version = "0.3.0"
 type = "plugin"
 entry = "plugin.plugins.reuse_before_build:ReuseBeforeBuildPlugin"
 

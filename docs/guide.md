@@ -8,6 +8,7 @@
 
 1. **给规则**：AI 接到「做个 X」时先取回冻结的规则正典，按四步走（检索 → 打分 → 贡献 → 交付）。
    v0.2.0 起，打分之后多一道**可改性硬闸**（屎山判红就不许 Join，只能 Extend/Fork/Build）；要调用上游能力时按 `references/integration-seam.md` 走**稳定接入口 + 薄适配层**；动手改代码一律**先切分支再开 PR**，不直推默认分支——自己的仓库也一样。
+   v0.3.0 起，`references/host-adapters.md` 里的粘贴型提示词都带 `RBB:PROMPT` 锚点和 sha256 登记（`prompt-digests.json`）：把提示词粘到别的聊天 AI 之后，用随包 `scripts/prompt_digest.py --check <文件>` 就能知道装的是哪一版，改过就报 `NO MATCH`。
 2. **给检索**：用你本机的 `gh` 直接查 GitHub，出一张候选表（★、最近推送、语言、许可、open issues）。
 3. **给验收**：谁把规则改写成别的格式（单文件系统提示、别的语言），跑一次校验器就知道规则有没有被偷偷削掉。
 
