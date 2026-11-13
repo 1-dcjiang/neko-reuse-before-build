@@ -12,7 +12,7 @@ N.E.K.O 里的 AI 接到「帮我做个 X」时，最容易干的事是直接写
 
 ## 版本记录
 
-完整修复与新增记录见 [CHANGELOG.md](CHANGELOG.md)。当前 `0.3.2` 修的是复查里的五项：`rbb_verify` 路径收敛、`gh` 参数注入、配置失败可见、默认值去重与布尔显式解析、录好的 `gh` JSON 契约测试。
+完整修复与新增记录见 [CHANGELOG.md](CHANGELOG.md)。`0.3.2` 修的是复查里的五项：`rbb_verify` 路径收敛、`gh` 参数注入、配置失败可见、默认值去重与布尔显式解析、录好的 `gh` JSON 契约测试；`0.3.3` 清理 README 历史段并把市场短描述压到 255 字上限。
 
 ## 五个工具
 
@@ -70,33 +70,20 @@ docs/guide.md                      插件面板里的使用说明
 - `config.example.toml` 承接运行配置模板（不含 `[plugin]`），`[settings]` 默认值不重复抄写，消掉「legacy runtime configuration」警告；
 - `tests/test_smoke.py`、`.vscode/settings.json`、`.vscode/tasks.json`、`pyproject.toml`、`.gitignore` 齐备；
 - `.github/workflows/{verify,release}.yml` 复用官方 `plugin-market-{verify,release}.yml@main`；
-- 发版 tag 必须与 `[plugin].version` 相同（当前 `0.3.2` → tag `v0.3.2`）。
+- 发版 tag 必须与 `[plugin].version` 相同（当前 `0.3.3` → tag `v0.3.3`）。
 
 ## 验过什么
 
-本版（v0.3.2）：
+本版（v0.3.3）：
 
 - **本地**：`python -m pytest tests` **49 passed**（离线 37 + SDK 桩 9 + 市场 smoke 3）；`ruff check .` 全绿；官方 `check -r` 通过（`tests=passed`、`payload_hash_verified=True`）。
 - **随包 skill**：`verify_localized.py` 对 `SKILL.md` 输出 `PASS verbatim`，`zh-guide.md` 输出 `translated(zh)`；规则块哈希 `fa0f991f…bc93` 未变。
 - **CI**：Verify / Release 的证据见本版 Release 的 `market-evidence.json`。
 
-v0.1.1 的历史记录（跑的是官方 `plugin-market-verify.yml` / `plugin-market-release.yml`，不是本地模拟）：
+## 发布与市场
 
-- **Verify**（push 与 tag 各一次）：ruff（`E4,E7,E9,F,I` / py311 / 120 列）→ `sync --clean` → `check --release` → `pytest`（35 项：本仓 32 + 随包 skill 3 条 smoke）→ 打包并校验「包里恰好一个 `manifest.toml`」→ 生成 `market-evidence.json`。
-- **Release**：`v0.1.1` 资产已产出 `reuse_before_build.neko-plugin`（81,181 字节 / sha256 `955425…5578` / payload_hash `8cc6d1…4ba1`），`market-evidence.json` 记录 `payload_hash_verified=true`、`tests=passed`、版本与 tag 一致（`source_commit` = `b803594`，`neko_commit` = `09e5160`）。
-- **本地**：35 项 `unittest`（离线 + SDK 桩，新增 3 条结论判定回归）、随包 skill 30 项、`verify_localized.py` 输出 `PASS verbatim rules=[1,2,3,4,5]/5`。
-
-> CI 里只剩两条环境性提示：`plugin source directory does not have its own git repository`（CI 把源目录拷出来构建导致），以及 Node 20 弃用提示（由官方复用工作流的 action 版本决定，非本仓可控）。
-
-## 市场登记（唯一未自动完成的一步）
-
-官方 `neko-plugin publish` 的最后一步是向 `market.project-neko.cn/api/v1/release-publications` POST Release URL。本仓试过，市场回了：
-
-```
-400 {"detail":"GitHub release 未绑定到唯一的已通过插件","code":"release_repo_mismatch"}
-```
-
-意思是仓库还没在市场侧「绑定到插件记录」。这一步要走市场网页的 **Upload plugin → Continue to authorize**，用作者本人的 N.E.K.O 账号授权后才建立绑定；没有账号授权就没法自动完成。绑定后重新 POST 同一个 Release URL 即可（重复提交会重新挂到同一次核验）。
+- 流程：打 tag → GitHub Release 产出 `reuse_before_build.neko-plugin` 与 `market-evidence.json` → `neko-plugin publish market <release-url>`。
+- 市场展示信息（简介、展示页 README）由市场侧独立维护，发版不会覆盖；发布后在开发者中心「编辑展示信息 / 编辑展示页面」同步。
 
 ## 边界（写在这里，也写进规则里）
 
