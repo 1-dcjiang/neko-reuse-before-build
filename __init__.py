@@ -25,7 +25,10 @@ from plugin.sdk.plugin import (
     ui,
 )
 
-from . import rbb_core
+try:
+    from . import rbb_core
+except ImportError:  # pytest 把仓库根当包直接导入 __init__.py 时的退化路径
+    import rbb_core
 
 _logger = logging.getLogger("N.E.K.O.Plugin_reuse_before_build.plugin.reuse_before_build")
 
@@ -47,6 +50,8 @@ class ReuseBeforeBuildPlugin(NekoPluginBase):
         self._limit: int = 6
         self._updated_days: int = 365
         self._timeout: int = 30
+        self._settings_source: str = "emergency-defaults"
+        self._settings_warning: str = ""
         self._python: str = ""
         self._rule_hash: str = ""
         self._hash_task: asyncio.Task | None = None
@@ -81,13 +86,15 @@ class ReuseBeforeBuildPlugin(NekoPluginBase):
     async def _load_settings(self):
         """读运行时配置段；宿主侧拿不到就用 plugin.toml 默认值，绝不让启动失败。"""
         section: dict = {}
+        host_error = ""
         try:
             cfg = await self.config.dump(timeout=5.0)
             if isinstance(cfg, dict):
                 raw = cfg.get("settings")
                 section = raw if isinstance(raw, dict) else {}
         except Exception as e:  # 无真实 ctx 或宿主未提供配置读接口时走兜底
-            self.logger.debug("读取 [settings] 失败，回退默认值：%s", e)
+            host_error = str(e)
+            self.logger.debug("读取宿主 [settings] 失败，回退 plugin.toml 默认值：%s", e)
         resolved = rbb_core.resolve_settings(section)
         self._enable_scan = resolved["enable_github_scan"]
         self._gh_binary = resolved["gh_binary"]
@@ -95,6 +102,12 @@ class ReuseBeforeBuildPlugin(NekoPluginBase):
         self._limit = resolved["default_limit"]
         self._updated_days = resolved["updated_days"]
         self._timeout = resolved["scan_timeout"]
+        self._settings_source = resolved["settings_source"]
+        warning = resolved["settings_warning"]
+        if host_error and not warning:
+            warning = f"宿主配置读接口不可用（{host_error}），当前用插件默认值"
+            self.logger.warning("%s", warning)
+        self._settings_warning = warning
 
     async def _probe_hash(self):
         try:
@@ -296,7 +309,8 @@ class ReuseBeforeBuildPlugin(NekoPluginBase):
             "外加声明行 `localized: host=… | kept=… | changed=… | unsupported=…`。"
             "何时用：把本 skill 改写成别的宿主格式（单文件系统提示、别的 frontmatter、别的语言）之后必须跑一次。"
             "前置：待校验文件存在且是绝对路径或相对插件目录可解析的路径。"
-            "限制：只读校验，不改目标文件。⚠️ 退出码 0 是唯一通过标准；失败会列出缺了什么，按提示补回，不许静默删除规则。"
+            "限制：只读校验，不改目标文件；路径必须位于插件工作目录内且是 .md，输出会截断。"
+            "⚠️ 退出码 0 是唯一通过标准；失败会列出缺了什么，按提示补回，不许静默删除规则。"
         ),
         parameters={
             "type": "object",
@@ -310,7 +324,7 @@ class ReuseBeforeBuildPlugin(NekoPluginBase):
         params = self._params(_)
         target = str(path or params.get("path") or "").strip()
         if not target:
-            return Err(SdkError("缺少 path（待校验副本路径）。给绝对路径再调一次。"))
+            return Err(SdkError("缺少 path（待校验副本路径）。给插件目录内的 .md 路径再调一次。"))
         res = await asyncio.to_thread(rbb_core.verify_localized, target, self._python)
         if res["rc"] == 0:
             return Ok({"ok": True, "exit_code": 0, "output": res["out"]})
@@ -318,7 +332,7 @@ class ReuseBeforeBuildPlugin(NekoPluginBase):
             "ok": False,
             "exit_code": res["rc"],
             "output": res["out"] or res["err"],
-            "fix": ("rc=2 通常是路径不在包内却带了 --canonical，或文件不存在；"
+            "fix": ("rc=2 通常是路径不在插件工作目录内、不是 .md，或文件不存在；"
                     "rc=1 是缺项，按 MISSING 列表补回后再跑，直到 rc=0。"),
         })
 
@@ -350,6 +364,8 @@ class ReuseBeforeBuildPlugin(NekoPluginBase):
                 "default_limit": self._limit,
                 "updated_days": self._updated_days,
                 "scan_timeout": self._timeout,
+                "source": self._settings_source,
+                "warning": self._settings_warning or None,
             },
         })
 

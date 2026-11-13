@@ -33,6 +33,8 @@
 | `updated_days` | 365 | 只看最近 N 天有推送的仓库 |
 | `scan_timeout` | 30 | 单次 gh 调用超时（秒） |
 
+默认值只在 `plugin.toml` 的 `[settings]` 写一份。`rbb_status.settings` 会显示 `source`（`runtime` / `plugin.toml` / `emergency-defaults`）与 `warning`；看到 `emergency-defaults` 说明配置文件坏了，正在用降级值（检索会被关掉、条数压到 1），修好 `plugin.toml` 再重载。
+
 ## 怎么看结果
 
 **检索成功但 0 命中**：这是「这一组词没搜到」，不是「不存在」。换英文同义词、降星数门槛、放宽时间窗再跑一轮。

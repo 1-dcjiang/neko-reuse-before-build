@@ -62,6 +62,18 @@ def md_cell(value: object) -> str:
     return text.replace("|", "\\|").replace("\r", " ").replace("\n", " ")
 
 
+def parse_search_output(out: str) -> list[dict]:
+    """把 `gh search repos --json …` 的真实输出解析成行；供契约测试直接复用。"""
+    text = (out or "").strip()
+    if not text:
+        return []
+    try:
+        parsed = json.loads(text)
+    except ValueError as exc:
+        raise RuntimeError(f"gh 输出不是 JSON（{exc}）：{text[:200]}") from None
+    return parsed if isinstance(parsed, list) else [parsed]
+
+
 def gh_json(args: list[str], timeout: int = 60) -> list[dict]:
     try:
         proc = subprocess.run(
@@ -79,23 +91,20 @@ def gh_json(args: list[str], timeout: int = 60) -> list[dict]:
         raise RuntimeError(f"gh 超时（>{timeout}s）") from None
     if proc.returncode != 0:
         raise RuntimeError(f"gh 失败（exit {proc.returncode}）：{proc.stderr.strip()[:300]}")
-    out = proc.stdout.strip()
-    if not out:
-        return []
-    try:
-        return json.loads(out)
-    except ValueError as exc:
-        raise RuntimeError(f"gh 输出不是 JSON（{exc}）：{out[:200]}") from None
+    return parse_search_output(proc.stdout)
+
+
+def search_args(keyword: str, stars: int, updated_since: str, limit: int) -> list[str]:
+    """所有选项放 `--` 之前，检索串放 `--` 之后，防止 `-` 开头的关键词被当成 gh 选项。"""
+    query = f"{keyword} stars:>{stars} pushed:>{updated_since}"
+    fields = "url,name,owner,stargazersCount,pushedAt,license,isArchived,language,openIssuesCount,description"
+    return ["search", "repos", "--archived=false", "--limit", str(limit), "--json", fields, "--", query]
 
 
 def scan(keyword: str, stars: int, updated_since: str, limit: int) -> tuple[list[dict], bool]:
     """返回 (rows, ok)。ok=False 表示这个关键词的检索本身失败，不是"没搜到"。"""
-    query = f"{keyword} stars:>{stars} pushed:>{updated_since}"
-    fields = "url,name,owner,stargazersCount,pushedAt,license,isArchived,language,openIssuesCount,description"
     try:
-        rows = gh_json(
-            ["search", "repos", query, "--archived=false", "--limit", str(limit), "--json", fields]
-        )
+        rows = gh_json(search_args(keyword, stars, updated_since, limit))
     except RuntimeError as exc:
         print(f"[warn] 关键词 {keyword!r} 检索失败：{exc}", file=sys.stderr)
         return [], False

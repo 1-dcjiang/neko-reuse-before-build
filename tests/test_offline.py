@@ -10,6 +10,7 @@ import importlib.util
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -151,6 +152,62 @@ class TestSearchWrapper(unittest.TestCase):
         import datetime as dt
         self.assertEqual(rbb_core.default_since(365, dt.date(2028, 2, 29)), "2027-03-01")
 
+    def test_keyword_starting_with_dash_goes_after_terminator(self):
+        """`-foo` 不能被 gh 当成选项：所有 flag 在 `--` 前，query 在 `--` 后。"""
+        argv = rbb_core.search_args("-foo", 50, "2025-01-01", 6)
+        self.assertEqual(argv[:2], ["search", "repos"])
+        self.assertEqual(argv[-2], "--")
+        self.assertTrue(argv[-1].startswith("-foo "))
+        self.assertLess(argv.index("--archived=false"), argv.index("--"))
+
+    def test_recorded_gh_json_parses_into_rows(self):
+        """契约测试：直接喂录好的 `gh search repos --json` 输出，不 mock 解析函数。"""
+        path = os.path.join(ROOT, "tests", "fixtures", "gh_search_repos.json")
+        with open(path, encoding="utf-8") as fh:
+            rows = rbb_core.parse_search_output(fh.read())
+        self.assertEqual(len(rows), 2)
+        row = rbb_core.normalize_search_row(rows[0], "video clip")
+        self.assertEqual(row["full_name"], "owner/autoclip")
+        self.assertEqual(row["matched_keyword"], "video clip")
+        self.assertEqual(row["license"]["spdxId"], "MIT")
+        self.assertEqual(rbb_core.license_flags(rows[1]["license"])[0], 0)
+
+    def test_scan_one_end_to_end_with_fake_gh(self):
+        """真跑 subprocess：假 gh 回放录好的 JSON，并记录 argv 验证 `--` 位置。"""
+        tmp = tempfile.mkdtemp(prefix="rbb_fakegh_")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        shutil.copy2(os.path.join(ROOT, "tests", "fixtures", "gh_search_repos.json"),
+                     os.path.join(tmp, "gh_search_repos.json"))
+        script = os.path.join(tmp, "fake_gh.py")
+        with open(script, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(
+                "import pathlib, sys\n"
+                "root = pathlib.Path(__file__).parent\n"
+                "(root / 'argv.txt').write_text('\\n'.join(sys.argv[1:]), encoding='utf-8')\n"
+                "print((root / 'gh_search_repos.json').read_text(encoding='utf-8'))\n"
+            )
+        if os.name == "nt":
+            gh = os.path.join(tmp, "gh.bat")
+            with open(gh, "w", encoding="ascii", newline="\r\n") as fh:
+                fh.write("@echo off\n")
+                fh.write(f'"{sys.executable}" "{script}" %*\n')
+        else:
+            gh = os.path.join(tmp, "gh")
+            with open(gh, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write("#!/bin/sh\n")
+                fh.write(f'exec "{sys.executable}" "{script}" "$@"\n')
+            os.chmod(gh, 0o755)
+
+        rows, err = rbb_core._scan_one("video clip", gh, 50, "2025-01-01", 6, 30)
+        self.assertEqual(err, "")
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["full_name"], "owner/autoclip")
+        with open(os.path.join(tmp, "argv.txt"), encoding="utf-8") as fh:
+            argv = fh.read().splitlines()
+        self.assertIn("--", argv)
+        self.assertTrue(argv[-1].startswith("video clip "))
+        self.assertLess(argv.index("--archived=false"), argv.index("--"))
+
 
 class TestDeliverable(unittest.TestCase):
     GOOD = """## 找到了什么
@@ -235,6 +292,40 @@ class TestTable(unittest.TestCase):
         self.assertEqual(len(re.findall(r"(?<!\\)\|", lines[2])), 9)
 
 
+class TestVerifyPathJail(unittest.TestCase):
+    """rbb_verify 的 path 不能变成任意文件读取器：必须在插件目录内且是 .md。"""
+
+    def test_bundled_skill_is_allowed(self):
+        real, err = rbb_core.resolve_localized_path(SKILL_MD)
+        self.assertEqual(err, "")
+        self.assertEqual(real, os.path.realpath(SKILL_MD))
+
+    def test_relative_path_resolves_against_plugin_root(self):
+        real, err = rbb_core.resolve_localized_path("skills/reuse-before-build/SKILL.md")
+        self.assertEqual(err, "")
+        self.assertEqual(real, os.path.realpath(SKILL_MD))
+
+    def test_outside_plugin_dir_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dst = os.path.join(tmp, "copy.md")
+            with open(dst, "w", encoding="utf-8") as fh:
+                fh.write("x")
+            res = rbb_core.verify_localized(dst)
+            self.assertEqual(res["rc"], 2)
+            self.assertIn("不在插件工作目录内", res["err"])
+
+    def test_non_markdown_is_rejected(self):
+        dst = os.path.join(ROOT, "plugin.toml")
+        real, err = rbb_core.resolve_localized_path(dst)
+        self.assertEqual(real, "")
+        self.assertIn(".md", err)
+
+    def test_parent_traversal_is_rejected(self):
+        real, err = rbb_core.resolve_localized_path("../README.md")
+        self.assertEqual(real, "")
+        self.assertIn("不在插件工作目录内", err)
+
+
 class TestSettings(unittest.TestCase):
     """配置解析是纯函数，宿主读不到配置时也必须给出可运行的一组值。"""
 
@@ -261,6 +352,24 @@ class TestSettings(unittest.TestCase):
     def test_unknown_keys_are_ignored(self):
         got = rbb_core.resolve_settings({"something_else": 1})
         self.assertNotIn("something_else", got)
+
+    def test_string_false_is_not_truthy(self):
+        """bool("false") 是 True；配置解析必须显式认字符串。"""
+        got = rbb_core.resolve_settings({"enable_github_scan": "false"})
+        self.assertFalse(got["enable_github_scan"])
+        self.assertTrue(rbb_core.resolve_settings({"enable_github_scan": "yes"})["enable_github_scan"])
+        self.assertFalse(rbb_core.resolve_settings({"enable_github_scan": 0})["enable_github_scan"])
+
+    def test_missing_manifest_reports_warning_and_emergency_source(self):
+        got = rbb_core.resolve_settings(None, plugin_toml=os.path.join(ROOT, "no-such-plugin.toml"))
+        self.assertEqual(got["settings_source"], "emergency-defaults")
+        self.assertIn("plugin.toml", got["settings_warning"])
+        self.assertEqual(got["default_limit"], rbb_core.SETTINGS_DEFAULTS["default_limit"])
+
+    def test_bundled_manifest_is_the_default_source(self):
+        got = rbb_core.resolve_settings(None)
+        self.assertEqual(got["settings_source"], "plugin.toml")
+        self.assertEqual(got["settings_warning"], "")
 
 
 if __name__ == "__main__":

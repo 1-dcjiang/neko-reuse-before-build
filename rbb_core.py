@@ -15,12 +15,15 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import logging
 import os
 import re
 import shutil
 import subprocess
 import tomllib
 from typing import Any
+
+_logger = logging.getLogger(__name__)
 
 PERMISSIVE = {"mit", "apache-2.0", "bsd-3-clause", "bsd-2-clause", "isc", "mpl-2.0", "0bsd", "unlicense"}
 
@@ -44,27 +47,53 @@ VERIFY_SCRIPT = os.path.join(SKILL_DIR, "scripts", "verify_localized.py")
 SKILL_MD = os.path.join(SKILL_DIR, "SKILL.md")
 PLUGIN_TOML = os.path.join(HERE, "plugin.toml")
 
-# 兜底默认值与 plugin.toml / config.example.toml 保持一致；三处任一被改坏时仍能启动。
+# 紧急降级值：不是「默认值」。真正的默认值只在 plugin.toml 的 [settings] 写一份；
+# 只有 plugin.toml 缺失/解析失败时才落到这里，并把 enable_github_scan 关掉、条数压到最小。
 SETTINGS_DEFAULTS: dict[str, Any] = {
-    "enable_github_scan": True,
+    "enable_github_scan": False,
     "gh_binary": "gh",
-    "default_stars": 50,
-    "default_limit": 6,
-    "updated_days": 365,
-    "scan_timeout": 30,
+    "default_stars": 0,
+    "default_limit": 1,
+    "updated_days": 1,
+    "scan_timeout": 5,
 }
 
 
-def manifest_settings(plugin_toml: str = "") -> dict[str, Any]:
-    """读 plugin.toml 里的 [settings] 作为默认值；读不到就返回空表（不抛）。"""
+def load_manifest_settings(plugin_toml: str = "") -> tuple[dict[str, Any], str]:
+    """读 plugin.toml 的 [settings]；返回 (配置, 警告)。失败时警告非空，不静默。"""
     path = plugin_toml or PLUGIN_TOML
     try:
         with open(path, "rb") as fh:
             data = tomllib.load(fh)
-    except Exception:
-        return {}
+    except Exception as exc:
+        warning = f"plugin.toml 读取/解析失败（{path}）：{exc}"
+        _logger.warning("%s；回退代码内置兜底默认值", warning)
+        return {}, warning
     section = data.get("settings")
-    return section if isinstance(section, dict) else {}
+    if not isinstance(section, dict):
+        warning = f"plugin.toml 缺少 [settings] 表（{path}）"
+        _logger.warning("%s；回退代码内置兜底默认值", warning)
+        return {}, warning
+    return section, ""
+
+
+def manifest_settings(plugin_toml: str = "") -> dict[str, Any]:
+    """读 plugin.toml 里的 [settings] 作为默认值；读不到就返回空表（不抛）。"""
+    return load_manifest_settings(plugin_toml)[0]
+
+
+def _as_bool(value: Any, default: bool) -> bool:
+    """显式解析布尔值：TOML 布尔直接用，字符串 "false"/"0"/"off" 不许被 bool() 当成 True。"""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    text = str(value).strip().casefold()
+    if text in {"1", "true", "yes", "y", "on"}:
+        return True
+    if text in {"0", "false", "no", "n", "off", ""}:
+        return False
+    return default
 
 
 def resolve_settings(section: Any = None, *, plugin_toml: str = "") -> dict[str, Any]:
@@ -72,9 +101,11 @@ def resolve_settings(section: Any = None, *, plugin_toml: str = "") -> dict[str,
 
     宿主侧 `self.config.dump()` 不可用时（例如在没有真实 ctx 的测试环境），
     调用方传 None 即可，这里仍然返回一套可运行的值，不让插件因为读不到配置就启动失败。
+    `settings_source` / `settings_warning` 供 rbb_status 如实显示当前用的是哪一层。
     """
     merged: dict[str, Any] = dict(SETTINGS_DEFAULTS)
-    merged.update({k: v for k, v in manifest_settings(plugin_toml).items() if k in SETTINGS_DEFAULTS})
+    manifest, warning = load_manifest_settings(plugin_toml)
+    merged.update({k: v for k, v in manifest.items() if k in SETTINGS_DEFAULTS})
     if isinstance(section, dict):
         merged.update({k: v for k, v in section.items() if k in SETTINGS_DEFAULTS})
 
@@ -86,14 +117,18 @@ def resolve_settings(section: Any = None, *, plugin_toml: str = "") -> dict[str,
         return max(lo, min(hi, value))
 
     gh_binary = str(merged.get("gh_binary") or "gh").strip() or "gh"
-    enabled = merged.get("enable_github_scan")
+    source = "runtime" if isinstance(section, dict) and section else (
+        "plugin.toml" if manifest else "emergency-defaults")
     return {
-        "enable_github_scan": enabled if isinstance(enabled, bool) else bool(enabled),
+        "enable_github_scan": _as_bool(merged.get("enable_github_scan"),
+                                       bool(SETTINGS_DEFAULTS["enable_github_scan"])),
         "gh_binary": gh_binary,
         "default_stars": _int("default_stars", 0, 10_000_000),
         "default_limit": _int("default_limit", 1, 50),
         "updated_days": _int("updated_days", 1, 3650),
         "scan_timeout": _int("scan_timeout", 5, 300),
+        "settings_source": source,
+        "settings_warning": warning,
     }
 
 
@@ -177,6 +212,18 @@ def _gh(gh_binary: str, args: list[str], timeout: int) -> subprocess.CompletedPr
     )
 
 
+def parse_search_output(out: str) -> list[dict]:
+    """把 gh search 的 JSON 输出解析成行；契约测试直接用录好的真实输出。"""
+    text = (out or "").strip()
+    if not text:
+        return []
+    try:
+        parsed = json.loads(text)
+    except ValueError as exc:
+        raise RuntimeError(f"gh 输出不是 JSON（{exc}）：{text[:200]}") from None
+    return parsed if isinstance(parsed, list) else [parsed]
+
+
 def gh_json(gh_binary: str, args: list[str], timeout: int = 30) -> list[dict]:
     try:
         proc = _gh(gh_binary, args, timeout)
@@ -186,14 +233,7 @@ def gh_json(gh_binary: str, args: list[str], timeout: int = 30) -> list[dict]:
         raise RuntimeError(f"gh 超时（>{timeout}s）") from None
     if proc.returncode != 0:
         raise RuntimeError(f"gh 失败（exit {proc.returncode}）：{proc.stderr.strip()[:300]}")
-    out = proc.stdout.strip()
-    if not out:
-        return []
-    try:
-        parsed = json.loads(out)
-    except ValueError as exc:
-        raise RuntimeError(f"gh 输出不是 JSON（{exc}）：{out[:200]}") from None
-    return parsed if isinstance(parsed, list) else [parsed]
+    return parse_search_output(proc.stdout)
 
 
 def auth_ok(gh_binary: str = "gh", timeout: int = 30) -> tuple[bool, str]:
@@ -211,21 +251,31 @@ def auth_ok(gh_binary: str = "gh", timeout: int = 30) -> tuple[bool, str]:
     return True, ""
 
 
-def _scan_one(kw: str, gh_binary: str, stars: int, updated_since: str, limit: int, timeout: int) -> tuple[list[dict], str]:
-    query = f"{kw} stars:>{stars} pushed:>{updated_since}"
+def search_args(keyword: str, stars: int, updated_since: str, limit: int) -> list[str]:
+    """构造 gh search argv：所有选项放在 `--` 之前，检索串放在 `--` 之后。
+
+    关键词以 `-` 开头时（例如 `-foo`）不加 `--` 会被 gh 当成选项，直接报错或误解析。
+    """
+    query = f"{keyword} stars:>{stars} pushed:>{updated_since}"
     fields = "url,name,owner,stargazersCount,pushedAt,license,isArchived,language,openIssuesCount,description"
+    return ["search", "repos", "--archived=false", "--limit", str(limit), "--json", fields, "--", query]
+
+
+def normalize_search_row(row: dict, keyword: str) -> dict:
+    """补 full_name / matched_keyword，不改 gh 原字段。"""
+    owner = (row.get("owner") or {}).get("login", "")
+    row["full_name"] = f"{owner}/{row.get('name', '')}" if owner else row.get("name", "")
+    row["matched_keyword"] = keyword
+    return row
+
+
+def _scan_one(kw: str, gh_binary: str, stars: int, updated_since: str, limit: int, timeout: int) -> tuple[list[dict], str]:
     try:
-        rows = gh_json(
-            gh_binary,
-            ["search", "repos", query, "--archived=false", "--limit", str(limit), "--json", fields],
-            timeout,
-        )
+        rows = gh_json(gh_binary, search_args(kw, stars, updated_since, limit), timeout)
     except RuntimeError as exc:
         return [], str(exc)
     for row in rows:
-        owner = (row.get("owner") or {}).get("login", "")
-        row["full_name"] = f"{owner}/{row.get('name', '')}" if owner else row.get("name", "")
-        row["matched_keyword"] = kw
+        normalize_search_row(row, kw)
     return rows, ""
 
 
@@ -427,10 +477,38 @@ def canonical_hash(python_exe: str = "") -> tuple[str, str]:
     return proc.stdout.strip(), ""
 
 
+def resolve_localized_path(target: str) -> tuple[str, str]:
+    """把待校验路径限制在插件工作目录内，且必须是 .md。
+
+    模型能传任意路径；不设防等于给它一个「读本机文件」的入口。相对路径按插件目录解析
+    （与工具描述一致），realpath 会穿透 `..` 与符号链接，逃出工作目录的一律拒绝。
+    """
+    raw = str(target or "").strip()
+    if not raw:
+        return "", "缺少 path（待校验副本路径）。给插件目录内的 .md 路径再调一次。"
+    candidate = raw if os.path.isabs(raw) else os.path.join(HERE, raw)
+    real = os.path.realpath(os.path.expanduser(candidate))
+    if not real.lower().endswith(".md"):
+        return "", "只允许校验 .md 文件；其它扩展名一律拒绝。"
+    root = os.path.realpath(HERE)
+    try:
+        inside = os.path.commonpath([real, root]) == root
+    except ValueError:
+        inside = False
+    if not inside:
+        return "", "目标不在插件工作目录内，已拒绝读取。把副本复制到插件目录内再校验。"
+    if not os.path.isfile(real):
+        return "", f"文件不存在：{os.path.basename(real)}（在插件工作目录内未找到）"
+    return real, ""
+
+
 def verify_localized(target: str, python_exe: str = "", extra: list[str] | None = None) -> dict[str, Any]:
-    """校验一份本地化副本；rc=0 才算保住规则。"""
+    """校验一份本地化副本；rc=0 才算保住规则。路径与输出都做收敛。"""
+    real, path_err = resolve_localized_path(target)
+    if path_err:
+        return {"rc": 2, "out": "", "err": path_err[:400]}
     py = python_exe or shutil.which("python") or "python"
-    args = [py, "-X", "utf8", VERIFY_SCRIPT, target, *(extra or [])]
+    args = [py, "-X", "utf8", VERIFY_SCRIPT, real, *(extra or [])]
     try:
         proc = subprocess.run(
             args, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60, shell=False,
@@ -439,4 +517,4 @@ def verify_localized(target: str, python_exe: str = "", extra: list[str] | None 
         return {"rc": -1, "out": "", "err": "找不到 Python 解释器"}
     except subprocess.TimeoutExpired:
         return {"rc": -1, "out": "", "err": "校验超时（>60s）"}
-    return {"rc": proc.returncode, "out": proc.stdout.strip(), "err": proc.stderr.strip()}
+    return {"rc": proc.returncode, "out": proc.stdout.strip()[:800], "err": proc.stderr.strip()[:400]}
