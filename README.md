@@ -49,7 +49,7 @@ skills/reuse-before-build/          规则本体（规则文本与上游逐字�
   scripts/repo_scan.py             无宿主时的 CLI 检索（退出码 0/2/3/4/5/6）
   scripts/prompt_digest.py         粘贴提示词反查（--check / --verify / --digest / --emit）
   scripts/verify_localized.py      本地化校验器（四道闸）
-tests/test_offline.py              67 条离线自检（不需要 N.E.K.O SDK）
+tests/test_offline.py              70 条离线自检（不需要 N.E.K.O SDK）
 tests/test_plugin_runtime.py       10 条运行时自检（跑在最小 SDK 桩上）
 tests/test_smoke.py                市场模板要求的清单/入口 smoke test（函数式，pytest 收集 3 条）
 tests/fixtures/gh_search_repos.json 录好的 gh 检索输出（契约测试用）
