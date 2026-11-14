@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.7 — 2026-11-14
+
+修一个会让 `rbb_scan` 在本机永远返回 `code=2` 的白名单自锁：
+
+- **根因**：`search_candidates()` 先用 `resolve_gh_path()` 把 `gh` 解析成绝对路径，再传给 `auth_ok()` / `_scan_one()`；但 `auth_ok()` 内部重新走 `command_path()`，而当时 `command_path()` 只接受字面量 `gh` / `gh.exe`，于是把自家刚解析出的绝对路径判为非法，返回“gh_binary 非法：只允许 gh / gh.exe”。默认配置也会中招，和用户是否把 gh 装在 PATH 里无关。
+- **修法**：`command_path()` 现在接受“由当前 PATH 解析出的同一个绝对路径”，并仍拒绝任意路径：basename 必须是 `gh` / `gh.exe`，且 `realpath` 必须与 `which_path_only()` 的结果一致；其他绝对路径（包括指向 `curl.exe` 等）继续拒绝。
+- **回归测试**：新增 `test_command_path_accepts_its_own_resolved_absolute_gh`、`test_command_path_rejects_unrelated_absolute_gh`，以及不 mock `auth_ok` 的 `test_search_candidates_absolute_gh_path_survives_auth`，防止只 mock 登录检查掩盖真实链路。
+- **实测**：修复前 `search_candidates(['react'])` 返回 `code=2 / gh_binary 非法`；修复后 `rbb_scan` 真实返回 `Ok(code=0, count=3)`，并列出 `react/react` 等 3 个候选。技能仓 `repo_scan.py` 不受影响，同参数本地跑出 3 个候选、退出码 0。
+- 测试：83 passed（离线 70 + SDK 桩 10 + 市场 smoke 3），`ruff check .` 全绿。
+- 规则本体与契约哈希 `fa0f991f…bc93` 未动。
+
 ## 0.3.6 — 2026-11-14
 
 按第四轮深审（7.5 / 10）修的 A/B、中 1–7 与轻量项：

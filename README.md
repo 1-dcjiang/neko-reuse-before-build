@@ -12,7 +12,7 @@ N.E.K.O 里的 AI 接到「帮我做个 X」时，最容易干的事是直接写
 
 ## 版本记录
 
-完整修复与新增记录见 [CHANGELOG.md](CHANGELOG.md)。`0.3.2` 修的是复查里的五项：`rbb_verify` 路径收敛、`gh` 参数注入、配置失败可见、默认值去重与布尔显式解析、录好的 `gh` JSON 契约测试；`0.3.3` 清理 README 历史段并把市场短描述压到 255 字上限；`0.3.4` 按第二轮复查修异常穿透、检索总预算、`gh_binary` 收敛、`extra` 白名单、结论词边界、空键去重、无时区时间与 stderr 脱敏；`0.3.5` 按第三轮复查去掉 `.bat/.cmd`、给登录检查留预算、补齐 stdout/Bearer 脱敏、夹取直调参数并兼容 Windows `py` 启动器；`0.3.6` 按第四轮深审把结论判定收到结论行、预算耗尽单列 `code=4`、Build 门禁识别 Markdown 装饰、关键词与日期严格校验，并让状态检查并行。
+完整修复与新增记录见 [CHANGELOG.md](CHANGELOG.md)。`0.3.2` 修的是复查里的五项：`rbb_verify` 路径收敛、`gh` 参数注入、配置失败可见、默认值去重与布尔显式解析、录好的 `gh` JSON 契约测试；`0.3.3` 清理 README 历史段并把市场短描述压到 255 字上限；`0.3.4` 按第二轮复查修异常穿透、检索总预算、`gh_binary` 收敛、`extra` 白名单、结论词边界、空键去重、无时区时间与 stderr 脱敏；`0.3.5` 按第三轮复查去掉 `.bat/.cmd`、给登录检查留预算、补齐 stdout/Bearer 脱敏、夹取直调参数并兼容 Windows `py` 启动器；`0.3.6` 按第四轮深审把结论判定收到结论行、预算耗尽单列 `code=4`、Build 门禁识别 Markdown 装饰、关键词与日期严格校验，并让状态检查并行；`0.3.7` 修复 `search_candidates` 把已解析的 gh 绝对路径传给 `auth_ok` 后被自家白名单拒绝的问题。
 
 ## 五个工具
 
@@ -70,13 +70,13 @@ docs/guide.md                      插件面板里的使用说明
 - `config.example.toml` 承接运行配置模板（不含 `[plugin]`），`[settings]` 默认值不重复抄写，消掉「legacy runtime configuration」警告；
 - `tests/test_smoke.py`、`.vscode/settings.json`、`.vscode/tasks.json`、`pyproject.toml`、`.gitignore` 齐备；
 - `.github/workflows/{verify,release}.yml` 复用官方 `plugin-market-{verify,release}.yml@main`；
-- 发版 tag 必须与 `[plugin].version` 相同（当前 `0.3.6` → tag `v0.3.6`）。
+- 发版 tag 必须与 `[plugin].version` 相同（当前 `0.3.7` → tag `v0.3.7`）。
 
 ## 验过什么
 
-本版（v0.3.6）：
+本版（v0.3.7）：
 
-- **本地**：`python -m pytest tests` **80 passed**（离线 67 + SDK 桩 10 + 市场 smoke 3）；`ruff check .` 全绿；官方 `check -r` 通过（`tests=passed`、`payload_hash_verified=True`）。
+- **本地**：`python -m pytest tests` **83 passed**（离线 70 + SDK 桩 10 + 市场 smoke 3）；`ruff check .` 全绿；官方 `check -r` 通过（`tests=passed`、`payload_hash_verified=True`）。
 - **随包 skill**：`verify_localized.py` 对 `SKILL.md` 输出 `PASS verbatim`，`zh-guide.md` 输出 `translated(zh)`；规则块哈希 `fa0f991f…bc93` 未变。
 - **CI**：Verify / Release 的证据见本版 Release 的 `market-evidence.json`。
 

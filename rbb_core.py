@@ -120,8 +120,28 @@ def resolve_gh_path(value: object) -> str:
 
 
 def command_path(value: object) -> str:
-    """给 gh_json/auth_ok 用：能解析成绝对路径就用绝对路径，否则保留文件名让 subprocess 报错。"""
-    return which_path_only(resolve_gh_executable(value)) or resolve_gh_executable(value)
+    """给 gh_json/auth_ok 用：只接受字面量 gh/gh.exe，或由同一 PATH 解析出的绝对路径。
+
+    `search_candidates()` 为了避免当前目录的 `gh.exe` 劫持，会先调用
+    `resolve_gh_path()` 拿到绝对路径，再把它传给 `auth_ok()` / `_scan_one()`。
+    因此这里不能只认字面量：绝对路径必须与当前 PATH 解析结果指向同一个文件，
+    否则仍视为非法。这样既不会把自家解析结果拦掉，也不会放行任意路径。
+    """
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    if os.path.isabs(raw):
+        base = os.path.basename(raw).lower()
+        if base not in GH_NAMES:
+            return ""
+        resolved = which_path_only(base)
+        if not resolved:
+            return ""
+        if os.path.normcase(os.path.realpath(resolved)) != os.path.normcase(os.path.realpath(raw)):
+            return ""
+        return resolved
+    name = resolve_gh_executable(raw)
+    return which_path_only(name) or name
 
 
 KEYWORD_MAX = 200

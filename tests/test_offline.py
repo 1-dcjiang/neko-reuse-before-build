@@ -188,6 +188,55 @@ class TestSearchWrapper(unittest.TestCase):
         self.assertEqual(res["code"], 0)
         self.assertEqual(seen["exe"], "C:/Tools/gh.exe")
 
+    def test_command_path_accepts_its_own_resolved_absolute_gh(self):
+        """search_candidates 传给 auth_ok/_scan_one 的绝对路径不能被自家白名单拦掉。"""
+        with tempfile.TemporaryDirectory() as td:
+            exe = os.path.join(td, "gh.exe")
+            with open(exe, "w", encoding="utf-8") as fh:
+                fh.write("")
+            with unittest.mock.patch.object(rbb_core, "which_path_only", return_value=exe):
+                self.assertEqual(rbb_core.command_path(exe), exe)
+                self.assertEqual(rbb_core.resolve_gh_path("gh.exe"), exe)
+
+    def test_command_path_rejects_unrelated_absolute_gh(self):
+        """绝对路径必须与 PATH 解析结果一致，不能凭 basename 放行任意 gh.exe。"""
+        with tempfile.TemporaryDirectory() as td:
+            allowed = os.path.join(td, "allowed", "gh.exe")
+            evil = os.path.join(td, "evil", "gh.exe")
+            os.makedirs(os.path.dirname(allowed))
+            os.makedirs(os.path.dirname(evil))
+            for p in (allowed, evil):
+                with open(p, "w", encoding="utf-8") as fh:
+                    fh.write("")
+            with unittest.mock.patch.object(rbb_core, "which_path_only", return_value=allowed):
+                self.assertEqual(rbb_core.command_path(evil), "")
+                self.assertEqual(rbb_core.command_path(os.path.join(td, "evil", "curl.exe")), "")
+
+    def test_search_candidates_absolute_gh_path_survives_auth(self):
+        """真实 auth_ok + command_path 的白名单链路，不能只靠 mock auth_ok 掩盖回归。"""
+        with open(os.path.join(ROOT, "tests", "fixtures", "gh_search_repos.json"),
+                  encoding="utf-8") as fh:
+            payload = fh.read()
+        with tempfile.TemporaryDirectory() as td:
+            exe = os.path.join(td, "gh.exe")
+            with open(exe, "w", encoding="utf-8") as fh:
+                fh.write("")
+            seen = []
+
+            def fake_gh(binary, args, timeout):
+                seen.append((binary, args))
+                if args[:2] == ["auth", "status"]:
+                    return subprocess.CompletedProcess([binary, *args], 0, "", "")
+                return subprocess.CompletedProcess([binary, *args], 0, payload, "")
+
+            with unittest.mock.patch.object(rbb_core, "resolve_gh_path", return_value=exe):
+                with unittest.mock.patch.object(rbb_core, "which_path_only", return_value=exe):
+                    with unittest.mock.patch.object(rbb_core, "_gh", side_effect=fake_gh):
+                        res = rbb_core.search_candidates(["video clip"], timeout=10)
+        self.assertEqual(res["code"], 0, res["reason"])
+        self.assertTrue(res["rows"])
+        self.assertTrue(all(pair[0] == exe for pair in seen), seen)
+
     def test_embedded_nul_from_subprocess_is_a_runtime_error(self):
         with unittest.mock.patch.object(rbb_core, "_gh", side_effect=ValueError("embedded null byte")):
             rows, err = rbb_core._scan_one("k", "gh", 50, "2025-01-01", 6, 5)
@@ -240,9 +289,10 @@ class TestGhHardening(unittest.TestCase):
             time.sleep(0.05)
             return [], "boom"
 
-        with unittest.mock.patch.object(rbb_core, "auth_ok", return_value=(True, "")):
-            with unittest.mock.patch.object(rbb_core, "_scan_one", side_effect=fake_scan):
-                res = rbb_core.search_candidates(["a", "b"], timeout=5)
+        with unittest.mock.patch.object(rbb_core, "resolve_gh_path", return_value="gh"):
+            with unittest.mock.patch.object(rbb_core, "auth_ok", return_value=(True, "")):
+                with unittest.mock.patch.object(rbb_core, "_scan_one", side_effect=fake_scan):
+                    res = rbb_core.search_candidates(["a", "b"], timeout=5)
         self.assertEqual(res["code"], 3)
         self.assertEqual(len(seen), 2)
         self.assertLess(seen[1], 5.0, f"第二个关键词没有共享总预算：{seen}")
@@ -258,9 +308,12 @@ class TestGhHardening(unittest.TestCase):
             clock[0] += 4.9
             return [], "boom"
 
-        with unittest.mock.patch.object(rbb_core, "auth_ok", return_value=(True, "")):
-            with unittest.mock.patch.object(rbb_core, "_scan_one", side_effect=fake_scan):
-                res = rbb_core.search_candidates(["a", "b", "c"], timeout=5, clock=fake_clock)
+        with unittest.mock.patch.object(rbb_core, "resolve_gh_path", return_value="gh"):
+            with unittest.mock.patch.object(rbb_core, "auth_ok", return_value=(True, "")):
+                with unittest.mock.patch.object(rbb_core, "_scan_one", side_effect=fake_scan):
+                    res = rbb_core.search_candidates(
+                        ["a", "b", "c"], timeout=5, clock=fake_clock
+                    )
         self.assertEqual(res["code"], 4, res)
         self.assertEqual(res["failed"], ["a"])
         self.assertEqual(res["skipped"], ["b", "c"])
@@ -321,14 +374,16 @@ class TestGhHardening(unittest.TestCase):
             seen.append(timeout)
             return True, ""
 
-        with unittest.mock.patch.object(rbb_core, "auth_ok", side_effect=fake_auth):
-            with unittest.mock.patch.object(rbb_core, "_scan_one", return_value=([], "boom")):
-                rbb_core.search_candidates(["a"], timeout=30)
+        with unittest.mock.patch.object(rbb_core, "resolve_gh_path", return_value="gh"):
+            with unittest.mock.patch.object(rbb_core, "auth_ok", side_effect=fake_auth):
+                with unittest.mock.patch.object(rbb_core, "_scan_one", return_value=([], "boom")):
+                    rbb_core.search_candidates(["a"], timeout=30)
         self.assertEqual(seen, [10.0])
 
     def test_auth_failure_is_code2_not_code3(self):
-        with unittest.mock.patch.object(rbb_core, "auth_ok", return_value=(False, "超时")):
-            res = rbb_core.search_candidates(["a"], timeout=5)
+        with unittest.mock.patch.object(rbb_core, "resolve_gh_path", return_value="gh"):
+            with unittest.mock.patch.object(rbb_core, "auth_ok", return_value=(False, "超时")):
+                res = rbb_core.search_candidates(["a"], timeout=5)
         self.assertEqual(res["code"], 2)
         self.assertIn("gh 未就绪", res["reason"])
 
@@ -339,11 +394,12 @@ class TestGhHardening(unittest.TestCase):
             seen.update(stars=stars, since=since, limit=limit)
             return [], ""
 
-        with unittest.mock.patch.object(rbb_core, "auth_ok", return_value=(True, "")):
-            with unittest.mock.patch.object(rbb_core, "_scan_one", side_effect=fake_scan):
-                res = rbb_core.search_candidates(
-                    ["a"], stars=-5, limit=999, updated_since="not-a-date", timeout=30
-                )
+        with unittest.mock.patch.object(rbb_core, "resolve_gh_path", return_value="gh"):
+            with unittest.mock.patch.object(rbb_core, "auth_ok", return_value=(True, "")):
+                with unittest.mock.patch.object(rbb_core, "_scan_one", side_effect=fake_scan):
+                    res = rbb_core.search_candidates(
+                        ["a"], stars=-5, limit=999, updated_since="not-a-date", timeout=30
+                    )
         self.assertEqual(seen["stars"], 0)
         self.assertEqual(seen["limit"], 10)
         self.assertEqual(seen["since"], rbb_core.default_since(365))
