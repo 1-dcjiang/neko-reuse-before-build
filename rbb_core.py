@@ -7,9 +7,9 @@
   3. verify_localized()   调用随包校验器检查本地化副本是否保住了不可变块；
   4. skill_text() / canonical_hash()  读取随包技能本体与正典哈希。
 
-退出码语义沿用 CLI（scripts/repo_scan.py）：
-  0 检索成功（可能 0 命中）· 2 gh 不可用（未安装/未登录/主机不通/参数非法）
-  3 gh 可用但全部关键词检索失败 · 4 预算耗尽、检索未完成
+内核 code 与 CLI 退出码是两套独立契约，消费方不能混用：
+  内核：0 成功 · 2 gh 不可用/参数非法 · 3 全部关键词失败 · 4 预算耗尽。
+  CLI：0 成功 · 2 用法错误 · 3 全部关键词失败 · 4 gh 不可用 · 5 写文件失败 · 6 部分成功。
 """
 
 from __future__ import annotations
@@ -99,21 +99,27 @@ def resolve_gh_executable(value: object) -> str:
 
 
 def which_path_only(name: str) -> str:
-    """只从 PATH 解析可执行文件，过滤空条目与当前目录。
-
-    Windows 的 `shutil.which()` 会把当前目录补进搜索路径；在刚 clone 的第三方仓库
-    里运行插件时，目录里的 `gh.exe` 会被优先执行。这里先剔除当前目录，再交给
-    `shutil.which(path=...)`，返回绝对路径。
-    """
+    """只从 PATH 解析可执行文件，并对 Windows 的隐式当前目录结果再做硬校验。"""
     raw = os.environ.get("PATH", "")
-    cwd = os.path.normcase(os.path.abspath(os.curdir))
+    cwd = os.path.normcase(os.path.realpath(os.curdir))
     entries = [
         part for part in raw.split(os.pathsep)
-        if part and os.path.normcase(os.path.abspath(part)) != cwd
+        if part and os.path.normcase(os.path.realpath(os.path.abspath(part))) != cwd
     ]
     if not entries:
         return ""
-    return shutil.which(name, path=os.pathsep.join(entries)) or ""
+    path = os.pathsep.join(entries)
+    # Windows 优先真正的 gh.exe，不让 gh.cmd/gh.bat 抢先进入 cmd 参数解释层。
+    names = ("gh.exe", name) if os.name == "nt" and name.lower() == "gh" else (name,)
+    for candidate in names:
+        found = shutil.which(candidate, path=path) or ""
+        if not found or not os.path.isabs(found):
+            continue
+        real = os.path.normcase(os.path.realpath(found))
+        if os.path.dirname(real) == cwd:
+            continue
+        return found
+    return ""
 
 
 def resolve_gh_path(value: object) -> str:
@@ -344,6 +350,9 @@ def render_table(rows: list[dict]) -> str:
 
 # ────────────────────────── gh 调用 ──────────────────────────
 
+GH_CREATIONFLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+
+
 def _gh(gh_binary: str, args: list[str], timeout: float) -> subprocess.CompletedProcess:
     return subprocess.run(
         [gh_binary, *args],
@@ -353,6 +362,7 @@ def _gh(gh_binary: str, args: list[str], timeout: float) -> subprocess.Completed
         errors="replace",
         timeout=timeout,
         shell=False,
+        creationflags=GH_CREATIONFLAGS,
     )
 
 
@@ -465,9 +475,20 @@ def normalize_scan_params(
 
 def _scan_one(kw: str, gh_binary: str, stars: int, updated_since: str,
               limit: int, timeout: float) -> tuple[list[dict], str]:
+    """限流与次限流只退避重试一次；等待与重试共用本关键词剩余预算。"""
+    args = search_args(kw, stars, updated_since, limit)
     try:
-        rows = gh_json(gh_binary, search_args(kw, stars, updated_since, limit), timeout)
-    except (OSError, RuntimeError, ValueError) as exc:
+        rows = gh_json(gh_binary, args, timeout)
+    except RuntimeError as exc:
+        detail = str(exc)
+        if timeout <= 4 or not re.search(r"rate limit|429|secondary rate", detail, re.IGNORECASE):
+            return [], detail
+        time.sleep(2)
+        try:
+            rows = gh_json(gh_binary, args, max(1.0, timeout - 2))
+        except (OSError, RuntimeError, ValueError) as retry_exc:
+            return [], f"限流退避后仍失败：{retry_exc}"
+    except (OSError, ValueError) as exc:
         return [], str(exc)
     for row in rows:
         normalize_search_row(row, kw)
@@ -612,17 +633,29 @@ def search_candidates(
 SECTIONS = [
     ("found", ("What I found", "找到了什么")),
     ("why", ("Why this one", "为什么选它")),
-    ("change", ("What I will add", "我要加什么")),
-    ("risk", ("Alternatives", "备选与风险", "备选")),
+    ("change", ("What I will add", "What I'll add", "我要加什么", "我要加的东西")),
+    ("risk", ("Alternatives", "Alternatives and risks", "备选与风险", "备选和风险", "备选方案与风险", "备选")),
 ]
 VERDICTS = ("Join", "Extend", "Fork", "Build", "加入", "扩展", "分叉", "新建")
-GATE_PREFIXES = ("Not reusable because:", "不可复用原因")
+VERDICT_ALIASES = {
+    "join": "Join", "加入": "Join", "extend": "Extend", "扩展": "Extend",
+    "fork": "Fork", "分叉": "Fork", "build": "Build", "新建": "Build",
+}
+MODIFIABILITY_ALIASES = {"green": "green", "绿": "green", "yellow": "yellow", "黄": "yellow", "red": "red", "红": "red"}
 # 门禁只看「结论是哪一条」，不看全文有没有出现过 Build——备选段几乎总会提到它。
-# ASCII 结论词必须整词匹配：rebuild / building / rebuild 不应命中 Build。
-# 结论行允许 Markdown 装饰：`## 结论：Build`、`> **结论：Build**`、`结论：**Build**`。
 CONCLUSION_RX = re.compile(
     r"^(?:最终|final\s+)?(?:结论|verdict|conclusion)\s*[:：]\s*[*_`> ]*"
     r"(Join|Extend|Fork|Build|加入|扩展|分叉|新建)(?![A-Za-z0-9_])",
+    re.IGNORECASE,
+)
+GATE_RX = re.compile(
+    r"^(?:不可复用原因|Not\s+reusable\s+because)"
+    r"(?:\s*/\s*(?:不可复用原因|Not\s+reusable\s+because))?\s*[:：]\s*(.*)$",
+    re.IGNORECASE,
+)
+MODIFIABILITY_RX = re.compile(
+    r"^(?:modifiability(?:\s+grade)?|可改性(?:档位|等级)?)\s*[:：]\s*[*_`> ]*"
+    r"(green|yellow|red|绿|黄|红)(?![A-Za-z0-9_])",
     re.IGNORECASE,
 )
 
@@ -646,17 +679,23 @@ def _heading_text(line: str) -> str:
 
 
 def _has_section(body: str, variants: tuple[str, ...]) -> bool:
-    wanted = {v.casefold() for v in variants}
-    return any(_heading_text(line) in wanted for line in body.splitlines())
+    """接受正典变体与括号后缀，但不把以标题词开头的普通长句当标题。"""
+    for line in body.splitlines():
+        heading = _heading_text(line)
+        for variant in variants:
+            wanted = variant.casefold()
+            if heading == wanted or re.match(rf"^{re.escape(wanted)}\s*[\(（\[【]", heading):
+                return True
+    return False
 
 
 def _conclusion_verdicts(text: str) -> list[str]:
-    """按出现顺序返回所有显式结论行里的判决词。"""
+    """按出现顺序返回所有显式结论行里的统一英文判决词。"""
     hits: list[str] = []
     for line in text.splitlines():
         match = CONCLUSION_RX.match(_plain_line(line))
         if match:
-            hits.append(match.group(1).casefold())
+            hits.append(VERDICT_ALIASES[match.group(1).casefold()])
     return hits
 
 
@@ -668,15 +707,57 @@ def _ascii_verdict_hits(text: str) -> list[str]:
             rf"(?<![A-Za-z0-9_]){re.escape(verdict)}(?![A-Za-z0-9_])",
             text, re.IGNORECASE,
         ):
-            hits.append(verdict.casefold())
+            hits.append(VERDICT_ALIASES[verdict.casefold()])
     return hits
 
 
+def _gate_parts(line: str) -> tuple[bool, str]:
+    match = GATE_RX.match(_plain_line(line))
+    if not match:
+        return False, ""
+    reason = match.group(1).strip().lstrip("*_`>：: ").strip().rstrip("*_` ").strip()
+    return True, reason
+
+
+def _quick_lane_result(lines: list[str]) -> dict[str, Any] | None:
+    """快速档是独立契约：三个有序非空字段，允许 Build 时前置门禁行。"""
+    first_is_gate, first_reason = _gate_parts(lines[0]) if lines else (False, "")
+    quick = lines[1:] if first_is_gate else lines
+    if not quick or not re.match(r"^(?:Reused|复用)\s*[:：]", _plain_line(quick[0]), re.IGNORECASE):
+        return None
+    expected = (("Reused", "复用"), ("Change", "改动"), ("Risk", "风险"))
+    missing: list[str] = []
+    if len(quick) != 3:
+        missing.append(f"quick_line_count({len(quick)}!=3)")
+    for index, names in enumerate(expected):
+        if index >= len(quick):
+            missing.append(f"quick:{names[0].lower()}")
+            continue
+        match = re.match(
+            rf"^(?:{names[0]}|{names[1]})\s*[:：]\s*(.*)$",
+            _plain_line(quick[index]), re.IGNORECASE,
+        )
+        if not match:
+            missing.append(f"quick:{names[0].lower()}")
+        elif not match.group(1).strip().strip("*_` "):
+            missing.append(f"quick:{names[0].lower()}_empty")
+    if first_is_gate and not first_reason:
+        missing.append("gate_reason")
+    return {
+        "ok": not missing, "missing": missing, "notes": ["lane: quick"],
+        "verdict": "", "modifiability": "", "lane": "quick",
+    }
+
+
 def check_deliverable(text: str) -> dict[str, Any]:
-    """检查交付文本的结构完整性；不做语义判断，只查"该在的东西在不在"。"""
+    """检查完整档/快速档结构、统一判决字段、可改性硬闸与 Build 首行门禁。"""
     missing: list[str] = []
     notes: list[str] = []
     body = text or ""
+    lines = [line for line in body.splitlines() if line.strip()]
+    quick = _quick_lane_result(lines)
+    if quick is not None:
+        return quick
 
     for key, variants in SECTIONS:
         if not _has_section(body, variants):
@@ -700,14 +781,31 @@ def check_deliverable(text: str) -> dict[str, Any]:
         if ascii_hits:
             notes.append("结论不唯一：建议补一行「结论：Join/Extend/Fork/Build」；Build 门禁只按结论判定，不按备选段里的提及。")
 
-    if verdict in ("build", "新建"):
-        line_ok = any(
-            _plain_line(line).lower().startswith(p.lower())
-            for line in body.splitlines()
-            for p in GATE_PREFIXES
-        )
-        if not line_ok:
+    grades: list[str] = []
+    for line in body.splitlines():
+        match = MODIFIABILITY_RX.match(_plain_line(line))
+        if match:
+            grade = MODIFIABILITY_ALIASES[match.group(1).casefold()]
+            if grade not in grades:
+                grades.append(grade)
+    modifiability = grades[0] if len(grades) == 1 else ""
+    if not grades:
+        missing.append("modifiability")
+    elif len(grades) > 1:
+        missing.append("modifiability_conflict")
+    else:
+        notes.append(f"modifiability: {modifiability}")
+    if verdict == "Join" and modifiability and modifiability != "green":
+        missing.append("join_requires_green")
+
+    if verdict == "Build":
+        first_is_gate, first_reason = _gate_parts(lines[0]) if lines else (False, "")
+        if not first_is_gate:
             missing.append("gate_line")
+            if any(_gate_parts(line)[0] for line in lines[1:]):
+                notes.append("Build 门禁必须位于回复首个非空行，不能放在文末。")
+        elif not first_reason:
+            missing.append("gate_reason")
 
     table_rows = sum(1 for line in body.splitlines() if line.strip().startswith("|"))
     if table_rows < 2:
@@ -716,7 +814,10 @@ def check_deliverable(text: str) -> dict[str, Any]:
     if re.search(r"\b\d{4}-\d{2}-\d{2}\b", body) is None:
         notes.append("no date seen — 引用仓库状态时建议带最近推送日期")
 
-    return {"ok": not missing, "missing": missing, "notes": notes}
+    return {
+        "ok": not missing, "missing": missing, "notes": notes,
+        "verdict": verdict, "modifiability": modifiability, "lane": "full",
+    }
 
 
 # ────────────────────────── 随包技能与校验器 ──────────────────────────
@@ -725,6 +826,36 @@ def skill_text(rel: str = "SKILL.md") -> str:
     path = os.path.join(SKILL_DIR, rel)
     with open(path, "r", encoding="utf-8", errors="replace") as fh:
         return fh.read()
+
+
+def skill_section(heading: str) -> str:
+    """原样抽取正典二级章节，避免入口里的手写摘要与规则漂移。"""
+    match = re.search(
+        rf"(?ms)^##\s+{re.escape(heading)}\s*$\n(.*?)(?=^##\s+|\Z)",
+        skill_text("SKILL.md"),
+    )
+    return f"## {heading}\n{match.group(1).strip()}" if match else ""
+
+
+def mandatory_rules() -> str:
+    """默认工具返回必须覆盖核心规则、判决硬闸、硬约束与不可信内容。"""
+    parts = [core_rules_block()]
+    parts += [skill_section(name) for name in (
+        "Step 2 — Evaluate", "Step 3 — Contribute", "Hard constraints", "Untrusted repository content",
+    )]
+    return "\n\n".join(part for part in parts if part)
+
+
+def flow_steps() -> list[dict[str, str]]:
+    """从正典提取四步标题与正文，不维护另一份容易过期的流程。"""
+    text = skill_text("SKILL.md")
+    steps = [
+        {"title": match.group(1), "content": match.group(2).strip()}
+        for match in re.finditer(
+            r"(?ms)^##\s+(Step\s+[1-4]\s+—\s+[^\n]+)\s*$\n(.*?)(?=^##\s+|\Z)", text,
+        )
+    ]
+    return steps if len(steps) == 4 else []
 
 
 _VERIFY_MODULE: Any = None
@@ -769,7 +900,8 @@ def resolve_python(python_exe: str = "") -> str:
         found = which_path_only(name)
         if found:
             return found
-    return "python"
+    # 与 gh 一样不退回裸程序名，避免 Windows 从当前目录启动同名文件。
+    return ""
 
 
 def canonical_hash(python_exe: str = "", timeout: float = 30) -> tuple[str, str]:

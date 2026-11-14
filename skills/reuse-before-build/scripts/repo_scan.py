@@ -41,6 +41,8 @@ except Exception:
 
 __version__ = "1.2.7"
 
+GH_CREATIONFLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+
 PERMISSIVE = {"mit", "apache-2.0", "bsd-3-clause", "bsd-2-clause", "isc", "mpl-2.0", "0bsd", "unlicense"}
 
 AUTH_HINT = (
@@ -76,21 +78,27 @@ _HOST_RX = re.compile(r"^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(
 
 
 def which_path_only(name: str) -> str:
-    """只从 PATH 解析可执行文件，绝不接受当前目录里的同名文件。
-
-    `shutil.which()` 在 Windows 上会把当前目录补进搜索路径；在刚 clone 的第三方
-    仓库里运行本脚本时，仓库自带的 `gh.exe`/`gh.bat` 就会被执行。这里显式过滤
-    掉空条目与当前目录，并把过滤后的 PATH 传给 `shutil.which()`。
-    """
+    """只从 PATH 解析可执行文件，并对 Windows 的隐式当前目录结果再做硬校验。"""
     raw = os.environ.get("PATH", "")
-    cwd = os.path.normcase(os.path.abspath(os.curdir))
+    cwd = os.path.normcase(os.path.realpath(os.curdir))
     entries = [
         part for part in raw.split(os.pathsep)
-        if part and os.path.normcase(os.path.abspath(part)) != cwd
+        if part and os.path.normcase(os.path.realpath(os.path.abspath(part))) != cwd
     ]
     if not entries:
         return ""
-    return shutil.which(name, path=os.pathsep.join(entries)) or ""
+    path = os.pathsep.join(entries)
+    # Windows 优先真正的 gh.exe，不让 gh.cmd/gh.bat 抢先进入 cmd 参数解释层。
+    names = ("gh.exe", name) if os.name == "nt" and name.lower() == "gh" else (name,)
+    for candidate in names:
+        found = shutil.which(candidate, path=path) or ""
+        if not found or not os.path.isabs(found):
+            continue
+        real = os.path.normcase(os.path.realpath(found))
+        if os.path.dirname(real) == cwd:
+            continue
+        return found
+    return ""
 
 
 def validate_keyword(value: str) -> str:
@@ -158,6 +166,7 @@ def gh_json(args: list[str], timeout: float = 60, gh_binary: str = "gh",
             errors="replace",
             timeout=timeout,
             shell=False,
+            creationflags=GH_CREATIONFLAGS,
             env=env,
         )
     except FileNotFoundError:
@@ -253,6 +262,7 @@ def auth_ok(host: str = "", gh_binary: str = "gh", timeout: float = 30) -> tuple
             errors="replace",
             timeout=max(2.0, float(timeout)),
             shell=False,
+            creationflags=GH_CREATIONFLAGS,
         )
     except FileNotFoundError:
         return False, "gh 可执行文件不在了（PATH 变了？）"

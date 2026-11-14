@@ -29,14 +29,10 @@ import os
 import re
 import sys
 
-try:
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-except Exception:
-    pass
-
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_CONTRACT = os.path.join(os.path.dirname(HERE), "localization.contract.json")
+# 随包英文正典的基线钉在代码里，不能只相信同目录、同样可被改写的契约。
+CANONICAL_SHA256 = "fa0f991fbfd236d860a2c401aff6f104f994e97d2b1fa100c23eee9d046fbc93"
 
 
 def read_text(path: str) -> str:
@@ -49,17 +45,29 @@ def _marker_line(line: str, marker: str) -> bool:
     return re.fullmatch(rf"<!--\s*{re.escape(marker)}\s*-->", line.strip()) is not None
 
 
+def _fence_mask(lines: list[str]) -> list[bool]:
+    """标记反引号与波浪号围栏； closing fence 必须同字符且不少于开栏长度。"""
+    masked: list[bool] = []
+    fence_char = ""
+    fence_len = 0
+    for line in lines:
+        match = re.match(r"^\s*(`{3,}|~{3,})", line)
+        if match:
+            marker = match.group(1)
+            if not fence_char:
+                fence_char, fence_len = marker[0], len(marker)
+            elif marker[0] == fence_char and len(marker) >= fence_len:
+                fence_char, fence_len = "", 0
+            masked.append(True)
+            continue
+        masked.append(bool(fence_char))
+    return masked
+
+
 def extract_block(text: str, begin: str, end: str) -> str | None:
     """取不变块。跳过代码围栏里的"标记示例"，并在多个候选里选规则最全的那个。"""
     lines = text.splitlines()
-    fenced: list[bool] = []
-    in_fence = False
-    for line in lines:
-        if line.strip().startswith("```"):
-            in_fence = not in_fence
-            fenced.append(True)
-            continue
-        fenced.append(in_fence)
+    fenced = _fence_mask(lines)
 
     begins = [i for i, line in enumerate(lines) if not fenced[i] and _marker_line(line, begin)]
     ends = [i for i, line in enumerate(lines) if not fenced[i] and _marker_line(line, end)]
@@ -164,11 +172,9 @@ def check_declaration(text: str, decl: dict) -> list[str]:
     keys = decl.get("keys", [])
     within = int(decl.get("within_last", 8))
     candidates: list[str] = []
-    in_fence = False
-    for line in text.splitlines():
-        if line.strip().startswith("```"):
-            in_fence = not in_fence
-            continue
+    lines = text.splitlines()
+    fenced = _fence_mask(lines)
+    for line, in_fence in zip(lines, fenced):
         if in_fence or not line.strip():
             continue
         candidates.append(line.strip())
@@ -180,6 +186,12 @@ def check_declaration(text: str, decl: dict) -> list[str]:
 
 
 def main() -> int:
+    # 只在 CLI 入口调整控制台编码；被插件 import 时绝不能改写宿主 stdout/stderr。
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, OSError):
+        pass
     ap = argparse.ArgumentParser(description="校验本地化副本是否保住了不可变项")
     ap.add_argument("file", help="待校验的本地化副本")
     ap.add_argument("--contract", default=DEFAULT_CONTRACT,
@@ -218,6 +230,9 @@ def main() -> int:
     if not args.print_hash and not re.fullmatch(r"[0-9a-fA-F]{64}", want_hash):
         print("FAIL  contract 缺少合法的 block.canonical_sha256（64 位十六进制）")
         return 1
+    if not args.print_hash and want_hash.lower() != CANONICAL_SHA256:
+        print("FAIL  contract 的正典哈希与代码内置基线不一致；拒绝使用被改写的基线。")
+        return 1
     try:
         rules_floor = int(contract.get("rules_min", 0))
     except (TypeError, ValueError):
@@ -244,7 +259,9 @@ def main() -> int:
     base = os.path.dirname(os.path.abspath(args.contract))
     allowed = {os.path.realpath(os.path.join(base, f))
                for f in block_cfg.get("canonical_files", [])}
-    is_ref = os.path.realpath(args.file) in allowed
+    real_file = os.path.realpath(args.file)
+    is_ref = real_file in allowed
+    is_canonical = real_file == os.path.realpath(os.path.join(base, block_cfg.get("canonical_file", "SKILL.md")))
     if args.canonical and not is_ref:
         print(f"REFUSED  {os.path.basename(args.file)} 不在包内参考件白名单里，"
               "不能用 --canonical；本地化副本必须带 localized: 声明行完整校验。",
@@ -268,6 +285,8 @@ def main() -> int:
         else:
             mode = "hash_mismatch"
             missing.append("invariants_hash")
+        if is_canonical and got != CANONICAL_SHA256:
+            missing.append("canonical_invariants_hash")
 
         r_missing, r_notes, rule_nums = check_rules(inner, int(contract.get("rules_min", 0)))
         missing += r_missing

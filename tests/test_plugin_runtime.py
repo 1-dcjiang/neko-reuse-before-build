@@ -103,6 +103,13 @@ class TestPluginRuntime(unittest.TestCase):
         numbered = [line for line in rules.splitlines() if line[:2] in ("1.", "2.", "3.", "4.", "5.")]
         self.assertEqual(len(numbered), 5)
         self.assertEqual(res.value["verdict_order"], ["Join", "Extend", "Fork", "Build"])
+        for needle in ("Modifiability gate", "Branch first", "Untrusted repository content"):
+            self.assertIn(needle, res.value["content"])
+        flow = asyncio.run(plugin.rbb_rules(section="flow"))
+        self.assertTrue(flow.is_ok(), _err_text(flow))
+        self.assertEqual(len(flow.value["steps"]), 4)
+        self.assertIn("Modifiability gate", flow.value["steps"][1]["content"])
+        self.assertFalse(hasattr(plugin, "_python"))
 
     def test_scan_respects_disabled_switch(self):
         plugin, _ = asyncio.run(self._lifecycle(

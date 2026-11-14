@@ -18,7 +18,7 @@
 2. `gh 可执行文件` 只接受 `gh` / `gh.exe`，从 PATH 解析绝对路径；不支持填任意路径或 `.bat` / `.cmd`。
 3. 点 **自检规则完整性**：
    - `rule_sha256 = fa0f991f…bc93` → 规则本体没被改动；
-   - `skill_exit_code = 0` 且输出含 `PASS … verbatim 5/5` → 随包校验通过。
+   - `skill_exit_code = 0` 且输出含 `PASS … verbatim` → 随包校验通过。
 
 任何一项不对，重装插件包，不要手改 `skills/` 里的文件。
 
@@ -41,10 +41,10 @@
 
 **检索失败（code=2 / 3 / 4）**：`gh` 没装、没登录、主机不通，或预算（code=4）用完。修 `gh auth status` / 增大 `scan_timeout` 后重跑，或按 `references/discovery-playbook.md` 用网页检索串人工查。**此时不得断言没有同类项目。**
 
-**格式检查不通过**：`rbb_check` 会列出缺哪一段。补齐再交付；判定新建时首行必须有 `不可复用原因 / Not reusable because:`。
+**格式检查不通过**：`rbb_check` 返回结构化 `verdict / modifiability / lane`，并列出缺项。完整档必须有四段、明确结论和可改性证据；只有绿档允许 Join，黄档只能 Extend，红档不得 Join。快速档只写 `复用 / 改动 / 风险`（或 `Reused / Change / Risk`）三条非空行。判定新建时，首个非空行必须有 `不可复用原因 / Not reusable because:` 和具体原因。
 
 ## 安全边界
 
 - 本插件**只读**：不建 issue、不提 PR、不发评论、不改任何远端状态。要公开写，由你逐次确认。
 - 不写你的文件系统，不改 N.E.K.O 配置，权限只有检索与只读校验。
-- 规则本体逐字随包，改动请回 [上游仓库](https://github.com/1-dcjiang/reuse-before-build) 提 PR。
+- 核心不变块按固定 SHA-256 基线随包校验；N.E.K.O 适配修复留在本仓库，通用规则变更再同步到[上游仓库](https://github.com/1-dcjiang/reuse-before-build)。

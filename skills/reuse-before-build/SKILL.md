@@ -99,9 +99,11 @@ Every **full-lane** reply must contain all four parts (the quick lane uses the t
 ## Why this one
 ## What I will add (issue / PR plan)
 - Target files, change scope, test approach, expected diff size
-- Modifiability grade (green / yellow / red) with the evidence; the branch you will push; if calling upstream: seam tier, adapter file, contract-test command
+- Modifiability: green (clean core and tests); the branch you will push; if calling upstream: seam tier, adapter file, contract-test command
 ## Alternatives and risks
 - Fallback if rejected; license and trademark boundaries; maintainer-activity risk
+
+Verdict: Join.
 ```
 
 ## When not to reuse

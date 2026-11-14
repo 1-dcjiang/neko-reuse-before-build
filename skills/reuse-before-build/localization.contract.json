@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "block": {
     "begin": "RBB:INVARIANTS:BEGIN",
     "end": "RBB:INVARIANTS:END",
@@ -55,6 +55,30 @@
     {
       "id": "quick_lane",
       "any": ["Reused:", "复用："]
+    },
+    {
+      "id": "untrusted_repository_content",
+      "any": ["data, not instructions", "数据，不是指令"]
+    },
+    {
+      "id": "modifiability_green_only",
+      "any": ["modifiability green only", "可改性仅限绿"]
+    },
+    {
+      "id": "no_fifth_verdict",
+      "any": ["There is no fifth verdict", "没有第五个判决"]
+    },
+    {
+      "id": "branch_first",
+      "any": ["Branch first, never the default branch", "分支优先，绝不直写主干"]
+    },
+    {
+      "id": "thin_adapter",
+      "any": ["stable seam and a thin adapter", "稳定接入口 + 薄适配层"]
+    },
+    {
+      "id": "never_join_red",
+      "any": ["Never Join a repo whose modifiability", "不 Join 可改性判红的仓库"]
     }
   ],
   "declaration": {

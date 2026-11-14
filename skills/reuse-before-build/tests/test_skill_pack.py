@@ -22,6 +22,11 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
+REPO_ROOT = os.path.dirname(os.path.dirname(ROOT))
+# 单独运行本目录时，pytest 也会导入仓库根的插件入口；先提供离线 SDK 桩。
+STUB = os.path.join(REPO_ROOT, "tests", "stub")
+if os.path.isdir(STUB) and STUB not in sys.path:
+    sys.path.insert(0, STUB)
 SCRIPT = os.path.join(ROOT, "scripts", "repo_scan.py")
 
 _SPEC = importlib.util.spec_from_file_location("repo_scan", SCRIPT)
@@ -90,16 +95,17 @@ class TestOutputs(unittest.TestCase):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def _run_stubbed(self, keywords, extra_args, scan_result):
-        old_argv, old_auth, old_scan = sys.argv, repo_scan.auth_ok, repo_scan.scan
+        old = sys.argv, repo_scan.auth_ok, repo_scan.scan, repo_scan.which_path_only
         try:
-            repo_scan.auth_ok = lambda: (True, "")
-            repo_scan.scan = lambda kw, s, u, lim: scan_result
+            repo_scan.which_path_only = lambda _name: os.path.join(self.tmp, "gh.exe")
+            repo_scan.auth_ok = lambda *args, **kwargs: (True, "")
+            repo_scan.scan = lambda *args, **kwargs: scan_result
             sys.argv = [SCRIPT, *keywords, *extra_args]
             err, out = io.StringIO(), io.StringIO()
             with contextlib.redirect_stderr(err), contextlib.redirect_stdout(out):
                 code = repo_scan.main()
         finally:
-            sys.argv, repo_scan.auth_ok, repo_scan.scan = old_argv, old_auth, old_scan
+            sys.argv, repo_scan.auth_ok, repo_scan.scan, repo_scan.which_path_only = old
         return code, out.getvalue(), err.getvalue()
 
     def test_md_and_json_out_are_written(self):
@@ -108,7 +114,10 @@ class TestOutputs(unittest.TestCase):
                "url": "https://github.com/o/r", "matched_keyword": "kw"}
         md = os.path.join(self.tmp, "c.md")
         js = os.path.join(self.tmp, "c.json")
-        code, out, _ = self._run_stubbed(["kw"], ["--md-out", md, "--json-out", js], ([row], True))
+        code, out, _ = self._run_stubbed(
+            ["kw"], ["--out-dir", self.tmp, "--md-out", "c.md", "--json-out", "c.json"],
+            ([row], True),
+        )
         self.assertEqual(code, 0)
         self.assertTrue(os.path.exists(md))
         with open(md, encoding="utf-8") as fh:
@@ -121,7 +130,10 @@ class TestOutputs(unittest.TestCase):
     def test_no_files_written_on_rc3(self):
         md = os.path.join(self.tmp, "c.md")
         js = os.path.join(self.tmp, "c.json")
-        code, _, err = self._run_stubbed(["kw"], ["--md-out", md, "--json-out", js], ([], False))
+        code, _, err = self._run_stubbed(
+            ["kw"], ["--out-dir", self.tmp, "--md-out", "c.md", "--json-out", "c.json"],
+            ([], False),
+        )
         self.assertEqual(code, 3)
         self.assertFalse(os.path.exists(md))
         self.assertFalse(os.path.exists(js))
@@ -139,50 +151,38 @@ class TestCli(unittest.TestCase):
         proc = run([])
         self.assertEqual(proc.returncode, 2)
 
-    def test_gh_absent_returns_2(self):
-        gh = shutil.which("gh")
-        if not gh:
-            self.skipTest("本机没有 gh，跳过（该场景已由 test_gh_absent_* 的 PATH 剥离覆盖）")
+    def test_gh_absent_returns_4(self):
         env = dict(os.environ)
-        keep = [p for p in env.get("PATH", "").split(os.pathsep)
-                if p and not os.path.exists(os.path.join(p, "gh.exe")) and not os.path.exists(os.path.join(p, "gh"))]
-        env["PATH"] = os.pathsep.join(keep)
-        proc = run(["x"], env=env)
-        self.assertEqual(proc.returncode, 2)
+        with tempfile.TemporaryDirectory() as empty_path:
+            env["PATH"] = empty_path
+            proc = run(["x"], env=env)
+        self.assertEqual(proc.returncode, 4)
         self.assertIn("未找到 gh CLI", proc.stderr)
 
+    def _run_without_network(self, auth_result, scan_result):
+        old = sys.argv, repo_scan.auth_ok, repo_scan.scan, repo_scan.which_path_only
+        with tempfile.TemporaryDirectory() as tmp:
+            try:
+                repo_scan.which_path_only = lambda _name: os.path.join(tmp, "gh.exe")
+                repo_scan.auth_ok = lambda *args, **kwargs: auth_result
+                repo_scan.scan = lambda *args, **kwargs: scan_result
+                sys.argv = [SCRIPT, "obsidian sync plugin"]
+                err, out = io.StringIO(), io.StringIO()
+                with contextlib.redirect_stderr(err), contextlib.redirect_stdout(out):
+                    code = repo_scan.main()
+            finally:
+                sys.argv, repo_scan.auth_ok, repo_scan.scan, repo_scan.which_path_only = old
+        return code, err.getvalue()
+
     def test_all_keywords_fail_returns_3(self):
-        """gh 可用但检索全失败（限流/瞬时故障）时必须是 rc=3，不能是 0。
-
-        用打桩代替真联网：auth 通过、每个关键词都返回 ok=False。
-        """
-        import contextlib
-        import io
-
-        old_argv = sys.argv
-        old_auth, old_scan = repo_scan.auth_ok, repo_scan.scan
-        try:
-            repo_scan.auth_ok = lambda: (True, "")
-            repo_scan.scan = lambda kw, s, u, lim: ([], False)
-            sys.argv = [SCRIPT, "obsidian sync plugin"]
-            err, out = io.StringIO(), io.StringIO()
-            with contextlib.redirect_stderr(err), contextlib.redirect_stdout(out):
-                code = repo_scan.main()
-        finally:
-            sys.argv = old_argv
-            repo_scan.auth_ok, repo_scan.scan = old_auth, old_scan
+        code, err = self._run_without_network((True, ""), ([], False))
         self.assertEqual(code, 3)
-        self.assertIn("检索失败 ≠ 没有同类项目", err.getvalue())
+        self.assertIn("检索失败 ≠ 没有同类项目", err)
 
-    def test_gh_host_unreachable_returns_2(self):
-        """gh 在但连不上主机：属于 gh 不可用，rc=2，且提示里要点明不是'没搜到'。"""
-        if not shutil.which("gh"):
-            self.skipTest("本机没有 gh")
-        env = dict(os.environ)
-        env["GH_HOST"] = "nohost.invalid"
-        proc = run(["obsidian sync plugin"], env=env)
-        self.assertEqual(proc.returncode, 2, msg=proc.stderr[-400:])
-        self.assertIn("gh 无法确认可用", proc.stderr)
+    def test_gh_host_unreachable_returns_4(self):
+        code, err = self._run_without_network((False, "offline"), ([], True))
+        self.assertEqual(code, 4)
+        self.assertIn("gh 无法确认可用", err)
 
 
 class TestVerifier(unittest.TestCase):
@@ -441,13 +441,13 @@ class TestPromptDigests(unittest.TestCase):
             fh.write(self.block_text("en-condensed"))
         p = self.run_digest("--check", path)
         self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
-        self.assertIn("MATCH  id=en-condensed", p.stdout)
+        self.assertIn("MATCH  CURRENT  id=en-condensed", p.stdout)
 
     def test_check_rejects_a_single_word_drift(self):
         tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, tmp, True)
         body = self.block_text("zh-condensed")
-        drifted = body.replace("先假设", "应当假设", 1)
+        drifted = body.replace("必须先搜索", "应当先搜索", 1)
         self.assertNotEqual(drifted, body)
         path = os.path.join(tmp, "drift.txt")
         with open(path, "w", encoding="utf-8", newline="\n") as fh:
@@ -464,10 +464,10 @@ class TestPromptDigests(unittest.TestCase):
             fh.write(self.block_text("zh-condensed").replace("\n", "  \r\n") + "\r\n\r\n")
         p = self.run_digest("--check", path)
         self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
-        self.assertIn("MATCH  id=zh-condensed", p.stdout)
+        self.assertIn("MATCH  CURRENT  id=zh-condensed", p.stdout)
 
     def test_verify_catches_a_doc_change_without_a_registry_update(self):
-        script = self.make_tree(self.read(self.HOST_ADAPTERS).replace("先假设", "应当假设", 1))
+        script = self.make_tree(self.read(self.HOST_ADAPTERS).replace("必须先搜索", "应当先搜索", 1))
         p = self.run_verify(script)
         self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
         self.assertIn("FAIL  zh-condensed", p.stderr)

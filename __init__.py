@@ -34,7 +34,7 @@ except ImportError:  # pytest 把仓库根当包直接导入 __init__.py 时的�
 _logger = logging.getLogger("N.E.K.O.Plugin_reuse_before_build.plugin.reuse_before_build")
 
 _RULES_PREAMBLE = (
-    "以下是本插件随包固定的规则正典（与上游 reuse-before-build 逐字一致）。"
+    "以下是本插件随包固定的规则正典；核心不变块另有固定 SHA-256 基线。"
     "它是**规则**不是建议：命中后按它执行，不要自行删条、合并或改编号。"
 )
 
@@ -53,7 +53,6 @@ class ReuseBeforeBuildPlugin(NekoPluginBase):
         self._timeout: int = 30
         self._settings_source: str = "emergency-defaults"
         self._settings_warning: str = ""
-        self._python: str = ""
         self._rule_hash: str = ""
         self._hash_task: asyncio.Task | None = None
 
@@ -117,7 +116,7 @@ class ReuseBeforeBuildPlugin(NekoPluginBase):
 
     async def _probe_hash(self):
         try:
-            h, err = await asyncio.to_thread(rbb_core.canonical_hash, self._python, self._timeout)
+            h, err = await asyncio.to_thread(rbb_core.canonical_hash, "", self._timeout)
             self._rule_hash = h
             if err:
                 self.logger.warning("规则哈希计算失败：%s", err)
@@ -132,7 +131,7 @@ class ReuseBeforeBuildPlugin(NekoPluginBase):
         )
         bundle_task = asyncio.create_task(
             asyncio.to_thread(rbb_core.verify_localized, rbb_core.SKILL_MD,
-                              self._python, None, self._timeout)
+                              "", None, self._timeout)
         )
         tasks = [gh_task, bundle_task]
         if probe is not None:
@@ -177,7 +176,7 @@ class ReuseBeforeBuildPlugin(NekoPluginBase):
         description=(
             "取回「先搜后建」的规则正典与四步流程。何时用：用户要求写任何新程序/脚本/库/插件/服务，"
             "或说「帮我做一个 X」「从零实现」「从零写一个」时，先调这个再动手；不确定要不要走完整流程时也先调它。"
-            "前置：无。返回：核心规则（不可变块，逐字）、两档位、四步流程、结论顺序 Join→Extend→Fork→Build。"
+            "前置：无。rules 默认含核心规则、可改性判决、硬约束与 Untrusted；flow 从正典提取四步及两档位。"
             "限制：只返回文本，不联网、不写文件。⚠️ 规则是约束不是建议，不要删条或改编号。"
         ),
         parameters={
@@ -185,7 +184,7 @@ class ReuseBeforeBuildPlugin(NekoPluginBase):
             "properties": {
                 "section": {
                     "type": "string",
-                    "description": "rules=只要核心规则（默认，最省上下文）；flow=只要四步流程；full=整份 SKILL.md",
+                    "description": "rules=核心与全部硬约束（默认）；flow=正典四步与两档位；full=整份 SKILL.md",
                     "enum": ["rules", "flow", "full"],
                 }
             },
@@ -202,24 +201,24 @@ class ReuseBeforeBuildPlugin(NekoPluginBase):
         if section == "full":
             return Ok({"section": "full", "content": text, "note": "整份 SKILL.md，篇幅较大。"})
         if section == "flow":
-            flow = [
-                "1. Discovery：三轮检索（GitHub 仓库/代码 → 包管理器与插件市场 → 候选仓库的 issue 里找人提过的同类需求）",
-                "2. Triage：3–6 个候选，六维 0–2 打分（活跃度/维护者响应/许可/贡献友好度/需求匹配/工程质量）",
-                "3. Contribute：先读 CONTRIBUTING 与最近合并的 PR；功能改动先开 issue，bug 可直接 PR",
-                "4. Deliver：四段交付（找到了什么 / 为什么选它 / 我要加什么 / 备选与风险）",
-            ]
-            return Ok({"section": "flow", "flow": flow,
-                       "verdict_order": ["Join", "Extend", "Fork", "Build"],
-                       "note": "完整档走四步；一次性小脚本走快速档，回复固定三行：复用 / 改动 / 风险。"})
+            steps = rbb_core.flow_steps()
+            if not steps:
+                return Err(SdkError("正典四步提取失败；请检查 SKILL.md 的 Step 1–4 标题，不要沿用手写流程。"))
+            return Ok({
+                "section": "flow", "flow": [step["title"] for step in steps], "steps": steps,
+                "two_lanes": rbb_core.skill_section("Two lanes"),
+                "verdict_order": ["Join", "Extend", "Fork", "Build"],
+                "note": "标题与正文均直接抽取自随包 SKILL.md。",
+            })
         block = rbb_core.core_rules_block()
-        if not block:
+        rules = rbb_core.mandatory_rules()
+        if not block or not rules:
             return Err(SdkError(
                 "随包规则块为空（SKILL.md 缺 RBB:INVARIANTS 标记或文件损坏）。"
                 "重装插件；不要在没有规则的情况下继续生成新项目。"
             ))
         return Ok({
-            "section": "rules",
-            "rules": block,
+            "section": "rules", "rules": block, "content": rules,
             "verdict_order": ["Join", "Extend", "Fork", "Build"],
             "preamble": _RULES_PREAMBLE,
             "canonical_sha256": self._rule_hash or "(正在计算，稍后调 rbb_status 查看)",
@@ -326,10 +325,11 @@ class ReuseBeforeBuildPlugin(NekoPluginBase):
     @llm_tool(
         name="rbb_check",
         description=(
-            "机械检查一段交付文本是否满足本 skill 的格式硬要求：四段（找到了什么/为什么选它/我要加什么/备选与风险）、"
-            "结论词（Join/Extend/Fork/Build 之一）、以及判定 Build 时首行必须有 `不可复用原因 / Not reusable because:`。"
+            "机械检查完整档四段、明确结论与可改性档位，或快速档 Reused/Change/Risk（复用/改动/风险）三行。"
+            "Build 首个非空行必须有非空的 `不可复用原因 / Not reusable because:`；红/黄档不得判 Join。"
             "何时用：准备把候选结论回复给用户之前，把整段回复粘进来跑一次。前置：无。"
-            "限制：只查结构，不判断内容真伪（仓库与星数仍需自己核）。⚠️ FAIL 时先补缺失项再回复，不要把 FAIL 稿直接交付。"
+            "限制：只查结构，不判断内容真伪。返回 ok、missing、verdict、modifiability 与 lane。"
+            "⚠️ FAIL 时先补缺失项再回复，不要把 FAIL 稿直接交付。"
         ),
         parameters={
             "type": "object",
@@ -345,14 +345,15 @@ class ReuseBeforeBuildPlugin(NekoPluginBase):
         if not str(text).strip():
             return Err(SdkError("缺少 deliverable（准备交付的回复正文）。把整段回复粘进来再调一次。"))
         res = rbb_core.check_deliverable(str(text))
+        payload = {
+            "ok": res["ok"], "missing": res["missing"], "notes": res["notes"],
+            "verdict": res["verdict"] or None,
+            "modifiability": res["modifiability"] or None,
+            "lane": res["lane"],
+        }
         if not res["ok"]:
-            return Ok({
-                "ok": False,
-                "missing": res["missing"],
-                "notes": res["notes"],
-                "fix": "补齐上方缺失项后重新调 rbb_check，直到 ok=true 再回复用户。",
-            })
-        return Ok({"ok": True, "missing": [], "notes": res["notes"]})
+            payload["fix"] = "补齐上方缺失项后重新调 rbb_check，直到 ok=true 再回复用户。"
+        return Ok(payload)
 
     @llm_tool(
         name="rbb_verify",
@@ -377,7 +378,7 @@ class ReuseBeforeBuildPlugin(NekoPluginBase):
         target = str(path or params.get("path") or "").strip()
         if not target:
             return Err(SdkError("缺少 path（待校验副本路径）。给插件目录内的 .md 路径再调一次。"))
-        res = await asyncio.to_thread(rbb_core.verify_localized, target, self._python, None, self._timeout)
+        res = await asyncio.to_thread(rbb_core.verify_localized, target, "", None, self._timeout)
         if res["rc"] == 0:
             return Ok({"ok": True, "exit_code": 0, "output": res["out"]})
         return Ok({
@@ -403,6 +404,7 @@ class ReuseBeforeBuildPlugin(NekoPluginBase):
             "plugin": "reuse_before_build",
             "rule_sha256": self._rule_hash or "无法计算",
             "bundled_skill_verify": {
+                "ok": bundled["rc"] == 0,
                 "exit_code": bundled["rc"],
                 "output": bundled["out"] or bundled["err"],
             },

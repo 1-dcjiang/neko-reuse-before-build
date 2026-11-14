@@ -458,6 +458,7 @@ class TestGhHardening(unittest.TestCase):
 
 ## 我要加什么
 基于字幕的高光片段挑选。
+可改性：绿（内核清晰且有测试）。
 
 ## 备选与风险
 备选：fork 自维护。风险：维护者响应慢。
@@ -481,10 +482,8 @@ class TestGhHardening(unittest.TestCase):
         self.assertIn("gate_line", res["missing"])
 
     def test_build_with_gate_line_passes(self):
-        text = self.GOOD.replace(
-            "结论：Join。",
-            "不可复用原因 / Not reusable because: 许可为 GPL-3.0，与用户闭源要求冲突。\n\n结论：Build。",
-        )
+        text = "不可复用原因 / Not reusable because: 许可为 GPL-3.0，与用户闭源要求冲突。\n\n"
+        text += self.GOOD.replace("结论：Join。", "结论：Build。")
         res = rbb_core.check_deliverable(text)
         self.assertTrue(res["ok"], res["missing"])
 
@@ -544,10 +543,8 @@ class TestGhHardening(unittest.TestCase):
         self.assertNotIn("gate_line", res["missing"])
 
     def test_markdown_decorated_gate_and_build_conclusion_pass(self):
-        text = self.GOOD.replace(
-            "结论：Join。",
-            "**不可复用原因：** 许可为 GPL-3.0，与闭源要求冲突。\n\n> 结论：**Build**。",
-        )
+        text = "**不可复用原因：** 许可为 GPL-3.0，与闭源要求冲突。\n\n"
+        text += self.GOOD.replace("结论：Join。", "> 结论：**Build**。")
         res = rbb_core.check_deliverable(text)
         self.assertTrue(res["ok"], res["missing"])
 
@@ -630,13 +627,13 @@ class TestVerifyPathJail(unittest.TestCase):
 
     def test_extra_flags_cannot_enable_canonical_bypass(self):
         """`--canonical` 不给模型侧注入：即使传进来也只会走完整声明校验。"""
-        dst = os.path.join(ROOT, "_review_localized_copy.md")
-        with open(SKILL_MD, encoding="utf-8") as fh:
-            text = fh.read()
-        with open(dst, "w", encoding="utf-8", newline="\n") as fh:
-            fh.write(text.rstrip() + "\n\nlocalized: host=test | kept=all | changed=none | unsupported=none\n")
-        self.addCleanup(lambda: os.path.exists(dst) and os.remove(dst))
-        res = rbb_core.verify_localized(dst, extra=["--canonical"])
+        with tempfile.TemporaryDirectory(dir=ROOT) as tmp:
+            dst = os.path.join(tmp, "localized.md")
+            with open(SKILL_MD, encoding="utf-8") as fh:
+                text = fh.read()
+            with open(dst, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(text.rstrip() + "\n\nlocalized: host=test | kept=all | changed=none | unsupported=none\n")
+            res = rbb_core.verify_localized(dst, extra=["--canonical"])
         self.assertEqual(res["rc"], 0, res["err"] or res["out"])
 
 
