@@ -12,7 +12,7 @@ N.E.K.O 里的 AI 接到「帮我做个 X」时，最容易干的事是直接写
 
 ## 版本记录
 
-完整修复与新增记录见 [CHANGELOG.md](CHANGELOG.md)。`0.3.2` 修的是复查里的五项：`rbb_verify` 路径收敛、`gh` 参数注入、配置失败可见、默认值去重与布尔显式解析、录好的 `gh` JSON 契约测试；`0.3.3` 清理 README 历史段并把市场短描述压到 255 字上限；`0.3.4` 按第二轮复查修异常穿透、检索总预算、`gh_binary` 收敛、`extra` 白名单、结论词边界、空键去重、无时区时间与 stderr 脱敏；`0.3.5` 按第三轮复查去掉 `.bat/.cmd`、给登录检查留预算、补齐 stdout/Bearer 脱敏、夹取直调参数并兼容 Windows `py` 启动器；`0.3.6` 按第四轮深审把结论判定收到结论行、预算耗尽单列 `code=4`、Build 门禁识别 Markdown 装饰、关键词与日期严格校验，并让状态检查并行；`0.3.7` 修复 `search_candidates` 把已解析的 gh 绝对路径传给 `auth_ok` 后被自家白名单拒绝的问题；`0.3.8` 统一插件与 CLI 脱敏、禁止 PATH 未命中时回退裸 `gh`、删除重复版本定义，并新增带双层 SHA-256 清单的 vendor 源码包与接入文档；`0.3.9` 按补深审补齐交付契约、可改性硬闸、快速档与结构化判决，加固本地化校验、Windows 进程路径和限流预算，并修复随包测试独立收集。
+完整修复与新增记录见 [CHANGELOG.md](CHANGELOG.md)。`0.3.2` 修的是复查里的五项：`rbb_verify` 路径收敛、`gh` 参数注入、配置失败可见、默认值去重与布尔显式解析、录好的 `gh` JSON 契约测试；`0.3.3` 清理 README 历史段并把市场短描述压到 255 字上限；`0.3.4` 按第二轮复查修异常穿透、检索总预算、`gh_binary` 收敛、`extra` 白名单、结论词边界、空键去重、无时区时间与 stderr 脱敏；`0.3.5` 按第三轮复查去掉 `.bat/.cmd`、给登录检查留预算、补齐 stdout/Bearer 脱敏、夹取直调参数并兼容 Windows `py` 启动器；`0.3.6` 按第四轮深审把结论判定收到结论行、预算耗尽单列 `code=4`、Build 门禁识别 Markdown 装饰、关键词与日期严格校验，并让状态检查并行；`0.3.7` 修复 `search_candidates` 把已解析的 gh 绝对路径传给 `auth_ok` 后被自家白名单拒绝的问题；`0.3.8` 统一插件与 CLI 脱敏、禁止 PATH 未命中时回退裸 `gh`、删除重复版本定义，并新增带双层 SHA-256 清单的 vendor 源码包与接入文档；`0.3.9` 按补深审补齐交付契约、可改性硬闸、快速档与结构化判决，加固本地化校验、Windows 进程路径和限流预算，并修复随包测试独立收集；`0.3.10` 将下游 vendor 接入、CI 校验与本地化扩展指南纳入发布包。
 
 ## 五个工具
 
@@ -78,11 +78,11 @@ docs/vendor.md                     下游 vendor 的固定版本接入与校验�
 - `config.example.toml` 承接运行配置模板（不含 `[plugin]`），`[settings]` 默认值不重复抄写，消掉「legacy runtime configuration」警告；
 - `tests/test_smoke.py`、`.vscode/settings.json`、`.vscode/tasks.json`、`pyproject.toml`、`.gitignore` 齐备；
 - `.github/workflows/{verify,release}.yml` 复用官方 `plugin-market-{verify,release}.yml@main`；
-- 发版 tag 必须与 `[plugin].version` 相同（当前 `0.3.9` → tag `v0.3.9`）。
+- 发版 tag 必须与 `[plugin].version` 相同（当前 `0.3.10` → tag `v0.3.10`）。
 
 ## 验过什么
 
-本版（v0.3.9）：
+本版（v0.3.10）：
 
 - **本地**：`python -m pytest -q tests skills/reuse-before-build/tests` **160 passed**（另有 20 个子测试）；`python -m ruff check .` 全绿；vendor 重复构建字节一致，解压后可脱离源仓库运行。
 - **随包 skill**：`verify_localized.py` 对 `SKILL.md` 输出 `PASS verbatim`，`zh-guide.md` 输出 `translated(zh)`；核心不变块哈希 `fa0f991f…bc93` 未变。
@@ -90,7 +90,7 @@ docs/vendor.md                     下游 vendor 的固定版本接入与校验�
 
 ## 发布与市场
 
-- 流程：打 tag → 官方 Release 产出 `reuse_before_build.neko-plugin`、检查文本与 `market-evidence.json` → 独立 `workflow_run` vendor 工作流上传 `neko-reuse-before-build-v0.3.9-vendor.zip`、`vendor_release.py` 和统一 `SHA256SUMS.txt`；官方 managed `release.yml` 保持原样。
+- 流程：打 tag → 官方 Release 产出 `reuse_before_build.neko-plugin`、检查文本与 `market-evidence.json` → 独立 `workflow_run` vendor 工作流上传 `neko-reuse-before-build-v0.3.10-vendor.zip`、`vendor_release.py` 和统一 `SHA256SUMS.txt`；官方 managed `release.yml` 保持原样。
 - 下游把源码纳入自己仓库时，按 [vendor 接入文档](docs/vendor.md) 固定 tag、校验 ZIP、复制到 `plugin/plugins/reuse_before_build` 并做复制后复检；不要与 `.neko-plugin` 重复安装。
 - 插件包发布到市场：`neko-plugin publish market <release-url>`。
 - 市场展示信息（简介、展示页 README）由市场侧独立维护，发版不会覆盖；发布后在开发者中心「编辑展示信息 / 编辑展示页面」同步。
