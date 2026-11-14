@@ -139,6 +139,12 @@ class TestBundledSkill(unittest.TestCase):
 
 
 class TestSearchWrapper(unittest.TestCase):
+    def setUp(self):
+        # 直接测试 gh 调用时提供一个明确的 PATH 解析结果；路径拒绝逻辑另有独立回归。
+        patcher = unittest.mock.patch.object(rbb_core, "which_path_only", return_value="C:/Tools/gh.exe")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_missing_gh_returns_code_2(self):
         res = rbb_core.search_candidates(["anything"], gh_binary="gh-not-installed-xyz")
         self.assertEqual(res["code"], 2)
@@ -279,6 +285,11 @@ class TestSearchWrapper(unittest.TestCase):
 
 class TestGhHardening(unittest.TestCase):
     """第二轮复查的回归：异常不漏、gh 不可换程序、stderr 脱敏、坏 JSON 不崩。"""
+
+    def setUp(self):
+        patcher = unittest.mock.patch.object(rbb_core, "which_path_only", return_value="C:/Tools/gh.exe")
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def test_scan_timeout_is_a_total_budget(self):
         """scan_timeout 是整次检索的总预算：第二个关键词拿到的是剩余时间，不是又一次 30s。"""

@@ -12,7 +12,7 @@ N.E.K.O 里的 AI 接到「帮我做个 X」时，最容易干的事是直接写
 
 ## 版本记录
 
-完整修复与新增记录见 [CHANGELOG.md](CHANGELOG.md)。`0.3.2` 修的是复查里的五项：`rbb_verify` 路径收敛、`gh` 参数注入、配置失败可见、默认值去重与布尔显式解析、录好的 `gh` JSON 契约测试；`0.3.3` 清理 README 历史段并把市场短描述压到 255 字上限；`0.3.4` 按第二轮复查修异常穿透、检索总预算、`gh_binary` 收敛、`extra` 白名单、结论词边界、空键去重、无时区时间与 stderr 脱敏；`0.3.5` 按第三轮复查去掉 `.bat/.cmd`、给登录检查留预算、补齐 stdout/Bearer 脱敏、夹取直调参数并兼容 Windows `py` 启动器；`0.3.6` 按第四轮深审把结论判定收到结论行、预算耗尽单列 `code=4`、Build 门禁识别 Markdown 装饰、关键词与日期严格校验，并让状态检查并行；`0.3.7` 修复 `search_candidates` 把已解析的 gh 绝对路径传给 `auth_ok` 后被自家白名单拒绝的问题。
+完整修复与新增记录见 [CHANGELOG.md](CHANGELOG.md)。`0.3.2` 修的是复查里的五项：`rbb_verify` 路径收敛、`gh` 参数注入、配置失败可见、默认值去重与布尔显式解析、录好的 `gh` JSON 契约测试；`0.3.3` 清理 README 历史段并把市场短描述压到 255 字上限；`0.3.4` 按第二轮复查修异常穿透、检索总预算、`gh_binary` 收敛、`extra` 白名单、结论词边界、空键去重、无时区时间与 stderr 脱敏；`0.3.5` 按第三轮复查去掉 `.bat/.cmd`、给登录检查留预算、补齐 stdout/Bearer 脱敏、夹取直调参数并兼容 Windows `py` 启动器；`0.3.6` 按第四轮深审把结论判定收到结论行、预算耗尽单列 `code=4`、Build 门禁识别 Markdown 装饰、关键词与日期严格校验，并让状态检查并行；`0.3.7` 修复 `search_candidates` 把已解析的 gh 绝对路径传给 `auth_ok` 后被自家白名单拒绝的问题；`0.3.8` 统一插件与 CLI 脱敏、禁止 PATH 未命中时回退裸 `gh`、删除重复版本定义，并新增带双层 SHA-256 清单的 vendor 源码包与接入文档。
 
 ## 五个工具
 
@@ -41,25 +41,31 @@ config.example.toml                可复制的运行配置示例（`[settings]`
 pyproject.toml                     最小工程声明（市场 CLI 的可选件，补上可消掉一条警告）
 __init__.py                        插件类：5 个 @llm_tool + 生命周期 + 自检 action
 rbb_core.py                        宿主无关纯逻辑（检索/格式检查/配置解析/校验包装），可离线测试
+scripts/vendor_release.py          可复现 vendor 构建、Release 清单与复制后复检
 skills/reuse-before-build/          规则本体（规则文本与上游逐字一致）
   SKILL.md                         正典，含 RBB:INVARIANTS 基线块
   localization.contract.json       块标记 + sha256 + 规则条数/锚点 + 声明格式
   references/                      检索手册 / 六维打分+可改性硬闸 / 贡献协议+分支纪律 / 接入口与薄适配层 / 宿主适配 / 中文完整版
   prompt-digests.json              粘贴型提示词登记表（id / 版本 / sha256 / 字符数）
+  scripts/redaction.py             插件内核与 CLI 共用的唯一脱敏实现
   scripts/repo_scan.py             无宿主时的 CLI 检索（退出码 0/2/3/4/5/6）
   scripts/prompt_digest.py         粘贴提示词反查（--check / --verify / --digest / --emit）
   scripts/verify_localized.py      本地化校验器（四道闸）
 tests/test_offline.py              70 条离线自检（不需要 N.E.K.O SDK）
 tests/test_plugin_runtime.py       10 条运行时自检（跑在最小 SDK 桩上）
-tests/test_smoke.py                市场模板要求的清单/入口 smoke test（函数式，pytest 收集 3 条）
+tests/test_smoke.py                市场模板要求的清单/入口 smoke test（3 条）
+tests/test_security_regressions.py 6 条脱敏、gh 路径与版本定义回归
+tests/test_vendor_release.py       10 条 vendor 构建、篡改拒绝与文档契约
+tests/test_vendor_smoke.py         1 条解压后脱离源仓库的独立运行验证
 tests/fixtures/gh_search_repos.json 录好的 gh 检索输出（契约测试用）
 CHANGELOG.md                       版本修复记录
 .vscode/                           市场模板要求的 settings.json / tasks.json
 docs/guide.md                      插件面板里的使用说明
-.github/workflows/                 managed-template（Verify / Release）
+docs/vendor.md                     下游 vendor 的固定版本接入与校验说明
+.github/workflows/                 官方 Verify / Release + 后续 vendor 发布
 ```
 
-> 说明：`skills/` 下的**规则文本**与上游逐字一致（sha256 `fa0f991f…bc93`，由 `verify_localized.py` 验证）。两个随包脚本为通过市场 CI 的 ruff 规则做过**纯格式微调**（局部变量重命名、导入方式调整），逻辑与退出码未变。
+> 说明：`skills/` 下的**规则文本**与上游逐字一致（sha256 `fa0f991f…bc93`，由 `verify_localized.py` 验证）。随包脚本保留上游 CLI 用法；N.E.K.O 版的安全修复与共用模块由独立回归测试锁定，不再把脚本描述成与上游逐字一致。
 
 
 ## 市场合规
@@ -70,19 +76,21 @@ docs/guide.md                      插件面板里的使用说明
 - `config.example.toml` 承接运行配置模板（不含 `[plugin]`），`[settings]` 默认值不重复抄写，消掉「legacy runtime configuration」警告；
 - `tests/test_smoke.py`、`.vscode/settings.json`、`.vscode/tasks.json`、`pyproject.toml`、`.gitignore` 齐备；
 - `.github/workflows/{verify,release}.yml` 复用官方 `plugin-market-{verify,release}.yml@main`；
-- 发版 tag 必须与 `[plugin].version` 相同（当前 `0.3.7` → tag `v0.3.7`）。
+- 发版 tag 必须与 `[plugin].version` 相同（当前 `0.3.8` → tag `v0.3.8`）。
 
 ## 验过什么
 
-本版（v0.3.7）：
+本版（v0.3.8）：
 
-- **本地**：`python -m pytest tests` **83 passed**（离线 70 + SDK 桩 10 + 市场 smoke 3）；`ruff check .` 全绿；官方 `check -r` 通过（`tests=passed`、`payload_hash_verified=True`）。
+- **本地**：`python -m pytest tests` **100 passed**（另有 4 个脱敏子测试）；Ruff 全绿；vendor 重复构建字节一致，解压后可脱离源仓库运行。
 - **随包 skill**：`verify_localized.py` 对 `SKILL.md` 输出 `PASS verbatim`，`zh-guide.md` 输出 `translated(zh)`；规则块哈希 `fa0f991f…bc93` 未变。
-- **CI**：Verify / Release 的证据见本版 Release 的 `market-evidence.json`。
+- **CI**：官方检查、payload 哈希与发布证明见本版 Release 的 `market-evidence.json` 和检查文本。
 
 ## 发布与市场
 
-- 流程：打 tag → GitHub Release 产出 `reuse_before_build.neko-plugin` 与 `market-evidence.json` → `neko-plugin publish market <release-url>`。
+- 流程：打 tag → 官方 Release 产出 `reuse_before_build.neko-plugin`、检查文本与 `market-evidence.json` → 独立 `workflow_run` vendor 工作流上传 `neko-reuse-before-build-v0.3.8-vendor.zip`、`vendor_release.py` 和统一 `SHA256SUMS.txt`；官方 managed `release.yml` 保持原样。
+- 下游把源码纳入自己仓库时，按 [vendor 接入文档](docs/vendor.md) 固定 tag、校验 ZIP、复制到 `plugin/plugins/reuse_before_build` 并做复制后复检；不要与 `.neko-plugin` 重复安装。
+- 插件包发布到市场：`neko-plugin publish market <release-url>`。
 - 市场展示信息（简介、展示页 README）由市场侧独立维护，发版不会覆盖；发布后在开发者中心「编辑展示信息 / 编辑展示页面」同步。
 
 ## 边界（写在这里，也写进规则里）

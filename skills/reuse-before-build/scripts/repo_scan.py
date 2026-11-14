@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import importlib.util
 import json
 import os
 import re
@@ -51,15 +52,21 @@ FAIL_HINT = (
     "检索失败 ≠ 没有同类项目。检查 `gh auth status` 与网络后重跑，"
     "或改用 references/discovery-playbook.md 的网页检索串手工复核；不要据此断言不存在。"
 )
-_SECRET_RX = re.compile(
-    r"(?i)(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|"
-    r"bearer\s+[A-Za-z0-9._~+/=-]{8,}|"
-    r"(?:access[_-]?token|api[_-]?key|token|password|secret)\s*[:=]\s*\S+)"
-)
-# URL userinfo（https://user:pass@host/...）和整行凭据头也要脱敏：
-# 前者常见于把带凭据的仓库地址直接贴进日志，后者常见于 curl 复现命令。
-_URL_CRED_RX = re.compile(r"(?i)(https?://)[^/\s:@]+(?::[^/\s@]*)?@")
-_HEADER_RX = re.compile(r"(?i)((?:cookie|authorization)\s*[:=]\s*)[^\r\n]+")
+
+
+def _load_redaction():
+    """按脚本位置加载共用实现，兼容直接执行与 importlib 契约测试。"""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "redaction.py")
+    spec = importlib.util.spec_from_file_location("rbb_redaction", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("随包脱敏模块不可用")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+redact_text = _load_redaction().redact_text
+
 # 关键词里出现检索限定符会覆盖脚本自己的 stars/pushed/archived 过滤条件。
 _QUALIFIER_RX = re.compile(
     r"(?i)(?:^|\s)(?:stars|archived|pushed|created|updated|is|topic|language|license|"
@@ -99,19 +106,6 @@ def validate_keyword(value: str) -> str:
         raise ValueError("关键词里不能带 stars:/pushed:/archived:/user:/org: 等检索限定符；"
                          "门槛请用 --stars / --updated-since")
     return text
-
-
-
-def redact_text(value: object, limit: int = 300) -> str:
-    """错误文本回给模型前脱敏：不把 token、口令和本机绝对路径原样吐出去。"""
-    text = str(value or "")
-    home = os.path.expanduser("~")
-    if home:
-        text = text.replace(home, "~")
-    text = _URL_CRED_RX.sub(r"\1[redacted]@", text)
-    text = _HEADER_RX.sub(r"\1[redacted]", text)
-    text = _SECRET_RX.sub("[redacted]", text)
-    return text[:limit]
 
 
 def default_since(today: dt.date | None = None) -> str:

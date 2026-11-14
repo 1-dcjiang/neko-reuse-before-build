@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.8 — 2026-11-14
+
+按复查截图第一组 `rbb（快门）` 的四项建议，只修改 N.E.K.O 适配版：
+
+- **脱敏只剩一份实现**：新增随包 `scripts/redaction.py`，`rbb_core.py` 与 `repo_scan.py` 都按文件位置加载同一模块；URL userinfo、Cookie / Authorization 头、GitHub token、Bearer、口令与 home 路径共用同一组规则和契约测试，不再各自维护正则。
+- **PATH 未命中不再退回裸 `gh`**：`command_path()` 只返回 `which_path_only()` 解析出的绝对路径；找不到时 `gh_json()` / `auth_ok()` 在启动子进程前就返回不可用，Windows 不会借机执行当前目录的 `gh.exe`。v0.3.7 已接受的合法绝对路径仍然可用。
+- **版本定义去重**：`verify_localized.py` 删除旧的 `__version__ = "1.2.6"`，只保留与上游技能本体对应的 `1.2.7`；N.E.K.O 插件版本独立升为 `0.3.8`。
+- **可复现 vendor 发布**：新增 `scripts/vendor_release.py`，固定 ZIP 文件顺序、时间戳、权限和压缩级别；tag 必须与 `plugin.toml` 版本一致。ZIP 内附 `VENDOR-SHA256SUMS.txt`，Release 另附覆盖插件包、vendor ZIP、校验工具与证明的 `SHA256SUMS.txt`。
+- **接入文档**：新增 `docs/vendor.md`，明确只用于本 N.E.K.O 仓库，给出固定 tag、下载校验、目标目录 `plugin/plugins/reuse_before_build`、复制后复检与升级约定。
+- **发布顺序**：官方 managed `release.yml` 保持原样；独立 `Vendor Source Release` 工作流通过 `workflow_run` 等待官方 Release 完整成功，再从同一发布提交构建、复检并上传附件，不影响市场发布门禁。
+- **回归测试**：覆盖两个调用方脱敏一致性、PATH 未命中不启动 gh、合法绝对路径、单一版本定义、重复构建字节一致、文件篡改、额外文件、路径穿越、复制后漂移与 Release 哈希不匹配。
+- 测试：100 passed（另有 4 个脱敏子测试），Ruff 全绿；规则本体与契约哈希 `fa0f991f…bc93` 未动。
+
 ## 0.3.7 — 2026-11-14
 
 修一个会让 `rbb_scan` 在本机永远返回 `code=2` 的白名单自锁：

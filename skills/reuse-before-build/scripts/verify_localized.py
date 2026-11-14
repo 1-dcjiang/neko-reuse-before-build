@@ -20,7 +20,7 @@
 
 from __future__ import annotations
 
-__version__ = "1.2.6"
+__version__ = "1.2.7"
 
 import argparse
 import hashlib
@@ -37,7 +37,6 @@ except Exception:
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_CONTRACT = os.path.join(os.path.dirname(HERE), "localization.contract.json")
-__version__ = "1.2.7"
 
 
 def read_text(path: str) -> str:

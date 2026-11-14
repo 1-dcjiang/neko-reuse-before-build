@@ -52,26 +52,31 @@ BUDGET_HINT = (
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKILL_DIR = os.path.join(HERE, "skills", "reuse-before-build")
 VERIFY_SCRIPT = os.path.join(SKILL_DIR, "scripts", "verify_localized.py")
+REDACTION_SCRIPT = os.path.join(SKILL_DIR, "scripts", "redaction.py")
 SKILL_MD = os.path.join(SKILL_DIR, "SKILL.md")
 PLUGIN_TOML = os.path.join(HERE, "plugin.toml")
 
 # gh 只允许这两个文件名：配置项和显式调用都不能指向 .bat/.cmd 或任意程序。
 GH_NAMES = {"gh", "gh.exe"}
-_SECRET_RX = re.compile(
-    r"(?i)(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|"
-    r"bearer\s+[A-Za-z0-9._~+/=-]{8,}|"
-    r"(?:access[_-]?token|api[_-]?key|authorization|token|password|secret)\s*[:=]\s*\S+)"
-)
+_REDACTION_MODULE: Any = None
+
+
+def _redaction_module() -> Any:
+    """加载随包的唯一脱敏实现；CLI 与本插件内核共用同一份规则。"""
+    global _REDACTION_MODULE
+    if _REDACTION_MODULE is None:
+        spec = importlib.util.spec_from_file_location("rbb_redaction", REDACTION_SCRIPT)
+        if spec is None or spec.loader is None:
+            raise RuntimeError("随包脱敏模块不可用")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _REDACTION_MODULE = module
+    return _REDACTION_MODULE
 
 
 def redact_text(value: object, limit: int = 300) -> str:
-    """错误文本回给模型前脱敏：不把 token、口令和本机绝对路径原样吐出去。"""
-    text = str(value or "")
-    home = os.path.expanduser("~")
-    if home:
-        text = text.replace(home, "~")
-    text = _SECRET_RX.sub("[redacted]", text)
-    return text[:limit]
+    """错误文本回给模型前脱敏，不把凭据或本机 home 路径原样返回。"""
+    return _redaction_module().redact_text(value, limit)
 
 
 def normalize_gh_binary(value: object) -> str:
@@ -141,7 +146,8 @@ def command_path(value: object) -> str:
             return ""
         return resolved
     name = resolve_gh_executable(raw)
-    return which_path_only(name) or name
+    # PATH 未命中也必须返回空串：退回裸名会让 Windows 再查当前目录。
+    return which_path_only(name) if name else ""
 
 
 KEYWORD_MAX = 200
