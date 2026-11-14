@@ -8,12 +8,14 @@
   4. skill_text() / canonical_hash()  读取随包技能本体与正典哈希。
 
 退出码语义沿用 CLI（scripts/repo_scan.py）：
-  0 检索成功（可能 0 命中）· 2 gh 不可用（未安装/未登录/主机不通）· 3 gh 可用但全部关键词失败
+  0 检索成功（可能 0 命中）· 2 gh 不可用（未安装/未登录/主机不通/参数非法）
+  3 gh 可用但全部关键词检索失败 · 4 预算耗尽、检索未完成
 """
 
 from __future__ import annotations
 
 import datetime as dt
+import importlib.util
 import json
 import logging
 import os
@@ -23,7 +25,7 @@ import subprocess
 import sys
 import time
 import tomllib
-from typing import Any
+from typing import Any, Callable
 
 _logger = logging.getLogger(__name__)
 
@@ -41,6 +43,10 @@ FAIL_HINT = (
 EMPTY_HINT = (
     "检索成功，但 0 命中。0 命中不等于不存在：换英文同义词、降 stars、放宽时间窗再跑一轮，"
     "或用 references/discovery-playbook.md 的生态检索补查。"
+)
+BUDGET_HINT = (
+    "检索预算用完了，部分关键词没有真正查。不要据此断言「没有同类项目」；"
+    "增大 scan_timeout / 工具 timeout，或减少关键词后重跑。"
 )
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -85,6 +91,75 @@ def resolve_gh_executable(value: object) -> str:
     if raw.lower() in GH_NAMES:
         return raw.lower()
     return ""
+
+
+def which_path_only(name: str) -> str:
+    """只从 PATH 解析可执行文件，过滤空条目与当前目录。
+
+    Windows 的 `shutil.which()` 会把当前目录补进搜索路径；在刚 clone 的第三方仓库
+    里运行插件时，目录里的 `gh.exe` 会被优先执行。这里先剔除当前目录，再交给
+    `shutil.which(path=...)`，返回绝对路径。
+    """
+    raw = os.environ.get("PATH", "")
+    cwd = os.path.normcase(os.path.abspath(os.curdir))
+    entries = [
+        part for part in raw.split(os.pathsep)
+        if part and os.path.normcase(os.path.abspath(part)) != cwd
+    ]
+    if not entries:
+        return ""
+    return shutil.which(name, path=os.pathsep.join(entries)) or ""
+
+
+def resolve_gh_path(value: object) -> str:
+    """白名单校验 + 只在 PATH 里解析成绝对路径；空串表示不可用。"""
+    name = resolve_gh_executable(value)
+    if not name:
+        return ""
+    return which_path_only(name)
+
+
+def command_path(value: object) -> str:
+    """给 gh_json/auth_ok 用：能解析成绝对路径就用绝对路径，否则保留文件名让 subprocess 报错。"""
+    return which_path_only(resolve_gh_executable(value)) or resolve_gh_executable(value)
+
+
+KEYWORD_MAX = 200
+_QUALIFIER_RX = re.compile(
+    r"(?i)(?:^|\s)(?:stars|archived|pushed|created|updated|is|topic|language|license|"
+    r"owner|repo|user|org|size|fork|mirror|template):"
+)
+
+
+def validate_keyword(value: object) -> str:
+    """关键词必须是纯文本：拒绝空、NUL/控制字符、超长与能覆盖过滤条件的限定符。"""
+    text = str(value or "").strip()
+    if not text:
+        raise ValueError("关键词不能为空")
+    if len(text) > KEYWORD_MAX:
+        raise ValueError(f"单个关键词不能超过 {KEYWORD_MAX} 字符")
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in text):
+        raise ValueError("关键词里不能有 NUL 或其它控制字符")
+    if _QUALIFIER_RX.search(text):
+        raise ValueError("关键词里不能带 stars:/pushed:/archived:/user:/org: 等检索限定符")
+    return text
+
+
+def normalize_keywords(keywords: object) -> tuple[list[str], str]:
+    """返回 (合法关键词, 错误)。错误非空时调用方按 code=2 处理，不发检索。"""
+    if isinstance(keywords, (list, tuple)):
+        items = list(keywords)
+    else:
+        items = str(keywords or "").replace("，", ",").split(",")
+    clean: list[str] = []
+    for item in items:
+        try:
+            kw = validate_keyword(item)
+        except ValueError as exc:
+            return [], str(exc)
+        if kw not in clean:
+            clean.append(kw)
+    return clean, ""
 
 # 紧急降级值：不是「默认值」。真正的默认值只在 plugin.toml 的 [settings] 写一份；
 # 只有 plugin.toml 缺失/解析失败时才落到这里，并把 enable_github_scan 关掉、条数压到最小。
@@ -275,7 +350,7 @@ def parse_search_output(out: str) -> list[dict]:
 
 
 def gh_json(gh_binary: str, args: list[str], timeout: float = 30) -> list[dict]:
-    exe = resolve_gh_executable(gh_binary)
+    exe = command_path(gh_binary)
     if not exe:
         raise RuntimeError("gh_binary 非法：只允许 gh / gh.exe")
     try:
@@ -284,6 +359,8 @@ def gh_json(gh_binary: str, args: list[str], timeout: float = 30) -> list[dict]:
         raise RuntimeError("gh 可执行文件不在了（PATH 变了？）") from None
     except subprocess.TimeoutExpired:
         raise RuntimeError(f"gh 超时（>{timeout:g}s）") from None
+    except ValueError as exc:
+        raise RuntimeError(f"gh 参数非法：{redact_text(exc)}") from None
     except OSError as exc:
         raise RuntimeError(f"gh 启动失败：{redact_text(exc)}") from None
     if proc.returncode != 0:
@@ -293,7 +370,7 @@ def gh_json(gh_binary: str, args: list[str], timeout: float = 30) -> list[dict]:
 
 def auth_ok(gh_binary: str = "gh", timeout: float = 30) -> tuple[bool, str]:
     """只查检索要用的那一个 host：`gh auth status` 在任一已配置 host 掉线时会整体非零。"""
-    exe = resolve_gh_executable(gh_binary)
+    exe = command_path(gh_binary)
     if not exe:
         return False, "gh_binary 非法：只允许 gh / gh.exe"
     host = os.environ.get("GH_HOST") or "github.com"
@@ -303,6 +380,8 @@ def auth_ok(gh_binary: str = "gh", timeout: float = 30) -> tuple[bool, str]:
         return False, "gh 可执行文件不在了（PATH 变了？）"
     except subprocess.TimeoutExpired:
         return False, f"`gh auth status` 超时（>{timeout:g}s）"
+    except ValueError as exc:
+        return False, f"gh 参数非法：{redact_text(exc, 200)}"
     except OSError as exc:
         return False, f"gh 启动失败：{redact_text(exc, 200)}"
     if proc.returncode != 0:
@@ -316,7 +395,7 @@ def search_args(keyword: str, stars: int, updated_since: str, limit: int) -> lis
 
     关键词以 `-` 开头时（例如 `-foo`）不加 `--` 会被 gh 当成选项，直接报错或误解析。
     """
-    query = f"{keyword} stars:>{stars} pushed:>{updated_since}"
+    query = f"{keyword} stars:>={stars} pushed:>={updated_since}"
     fields = "url,name,owner,stargazersCount,pushedAt,license,isArchived,language,openIssuesCount,description"
     return ["search", "repos", "--archived=false", "--limit", str(limit), "--json", fields, "--", query]
 
@@ -346,11 +425,15 @@ def normalize_scan_params(
     raw_since = str(updated_since or "").strip()
     note = ""
     if raw_since:
-        try:
-            dt.date.fromisoformat(raw_since)
-        except ValueError:
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw_since):
             note = f"updated_since={raw_since!r} 不是 YYYY-MM-DD，已回退到最近 {days_n} 天"
             raw_since = ""
+        else:
+            try:
+                dt.date.fromisoformat(raw_since)
+            except ValueError:
+                note = f"updated_since={raw_since!r} 不是有效日期，已回退到最近 {days_n} 天"
+                raw_since = ""
     return stars_n, limit_n, raw_since or default_since(days_n), note
 
 
@@ -358,7 +441,7 @@ def _scan_one(kw: str, gh_binary: str, stars: int, updated_since: str,
               limit: int, timeout: float) -> tuple[list[dict], str]:
     try:
         rows = gh_json(gh_binary, search_args(kw, stars, updated_since, limit), timeout)
-    except (OSError, RuntimeError) as exc:
+    except (OSError, RuntimeError, ValueError) as exc:
         return [], str(exc)
     for row in rows:
         normalize_search_row(row, kw)
@@ -373,32 +456,32 @@ def search_candidates(
     gh_binary: str = "gh",
     timeout: int = 30,
     updated_days: int = 365,
+    clock: Callable[[], float] | None = None,
 ) -> dict[str, Any]:
     """检索 GitHub 候选仓库，返回结构化结果（不抛异常）。
 
-    code=0 检索成功（rows 可能为空）· code=2 gh 不可用 · code=3 全部关键词失败
+    code=0 检索成功（rows 可能为空）· code=2 gh 不可用/参数非法
+    code=3 全部关键词检索失败 · code=4 预算耗尽、检索未完成
     调用方必须把 code!=0 当成「没查成」，绝不等于「不存在」。
 
     `timeout` 是整次检索的总预算（登录检查 + 所有关键词），不是每个关键词各给一份。
     """
-    clean = [k.strip() for k in keywords if k and k.strip()]
+    clean, kw_error = normalize_keywords(keywords)
     result: dict[str, Any] = {
         "code": 0, "ok": False, "rows": [], "table": "", "keywords": clean,
-        "failed": [], "reason": "", "note": "", "hint": "",
+        "failed": [], "skipped": [], "reason": "", "note": "", "hint": "",
     }
+    if kw_error:
+        result.update(code=2, reason=f"关键词非法：{kw_error}", hint=AUTH_HINT)
+        return result
     if not clean:
         result.update(code=2, reason="没有可用的检索关键词（keywords 为空）。", hint=AUTH_HINT)
         return result
 
-    exe = resolve_gh_executable(gh_binary)
+    exe = resolve_gh_path(gh_binary)
     if not exe:
         result.update(code=2,
-                      reason="gh_binary 非法：只允许 gh / gh.exe。",
-                      hint=AUTH_HINT)
-        return result
-    if not (os.path.isabs(exe) and os.path.exists(exe)) and not shutil.which(exe):
-        result.update(code=2,
-                      reason=f"未找到 gh CLI（{exe}）。安装 GitHub CLI 并 `gh auth login` 后重试。",
+                      reason="gh 不可用：只允许 PATH 里的 gh / gh.exe，且不接受当前目录里的同名文件。",
                       hint=AUTH_HINT)
         return result
 
@@ -406,7 +489,8 @@ def search_candidates(
         total_budget = max(5, min(300, int(timeout)))
     except (TypeError, ValueError):
         total_budget = 30
-    deadline = time.monotonic() + total_budget
+    now = clock or time.monotonic
+    deadline = now() + total_budget
     # 登录检查最多拿 40% 预算（上限 10s），剩下的留给关键词；否则 auth 一慢，
     # 后面每个关键词都只剩 0.x 秒，会被误报成 code=3「gh 坏了」。
     auth_budget = max(2.0, min(10.0, total_budget * 0.4))
@@ -414,7 +498,7 @@ def search_candidates(
     if not ok:
         result.update(code=2, reason=f"gh 未就绪：{why}", hint=AUTH_HINT)
         return result
-    if deadline - time.monotonic() <= 0.2:
+    if deadline - now() <= 0.2:
         result.update(
             code=2,
             reason=f"`gh auth status` 用完了总时限（{total_budget}s），还没开始检索关键词。",
@@ -427,12 +511,13 @@ def search_candidates(
         result["note"] = note
     merged: dict[str, dict] = {}
     failed: list[str] = []
+    skipped: list[str] = []
     errors: list[str] = []
     for kw in clean:
-        remaining = deadline - time.monotonic()
+        remaining = deadline - now()
         if remaining <= 0.2:
-            failed.append(kw)
-            errors.append(f"{kw}: 总时限 {total_budget}s 已用完")
+            skipped.append(kw)
+            errors.append(f"{kw}: 总时限 {total_budget}s 已用完，未检索（skipped）")
             continue
         rows, err = _scan_one(kw, exe, stars_n, since, limit_n, min(float(total_budget), remaining))
         if err:
@@ -464,23 +549,35 @@ def search_candidates(
     result["rows"] = rows
     result["table"] = render_table(rows) if rows else ""
     result["failed"] = failed
+    result["skipped"] = skipped
     result["stars"], result["updated_since"], result["limit"] = stars_n, since, limit_n
 
     notes = [note] if note else []
+    if skipped and not rows and len(failed) + len(skipped) == len(clean):
+        result.update(
+            code=4,
+            reason="检索未完成（预算耗尽）：" + "; ".join(errors)[:600],
+            hint=BUDGET_HINT,
+        )
+        return result
     if failed and len(failed) == len(clean):
-        result.update(code=3,
-                      reason="全部关键词检索失败：" + "; ".join(errors)[:600],
-                      hint=FAIL_HINT)
+        result.update(
+            code=3,
+            reason="全部关键词检索失败：" + "; ".join(errors)[:600],
+            hint=FAIL_HINT,
+        )
         return result
     if failed:
         notes.append(f"{len(failed)}/{len(clean)} 个关键词检索失败，结果可能偏少。")
-    elif not rows:
+    if skipped:
+        notes.append(f"{len(skipped)}/{len(clean)} 个关键词因预算耗尽未检索（skipped），结果可能偏少。")
+    if not rows and not failed and not skipped:
         notes.append(EMPTY_HINT)
-    else:
+    elif rows:
         notes.append(f"共 {len(rows)} 个去重候选（{len(clean)} 个关键词）。下一步：按 "
                      "references/repo-triage.md 读每个仓库的 CONTRIBUTING 与最近合并的 PR，做六维打分。")
     result["note"] = "；".join(notes)
-    result["ok"] = True
+    result["ok"] = result["code"] == 0
     return result
 
 
@@ -496,19 +593,57 @@ VERDICTS = ("Join", "Extend", "Fork", "Build", "加入", "扩展", "分叉", "�
 GATE_PREFIXES = ("Not reusable because:", "不可复用原因")
 # 门禁只看「结论是哪一条」，不看全文有没有出现过 Build——备选段几乎总会提到它。
 # ASCII 结论词必须整词匹配：rebuild / building / rebuild 不应命中 Build。
+# 结论行允许 Markdown 装饰：`## 结论：Build`、`> **结论：Build**`、`结论：**Build**`。
 CONCLUSION_RX = re.compile(
-    r"(?:结论|verdict|conclusion)\s*[:：]\s*"
+    r"^(?:最终|final\s+)?(?:结论|verdict|conclusion)\s*[:：]\s*[*_`> ]*"
     r"(Join|Extend|Fork|Build|加入|扩展|分叉|新建)(?![A-Za-z0-9_])",
     re.IGNORECASE,
 )
 
 
-def _verdict_present(text: str, verdict: str) -> bool:
-    """ASCII 结论词按整词匹配，中文结论词按子串匹配。"""
-    if verdict.isascii():
-        return re.search(rf"(?<![A-Za-z0-9_]){re.escape(verdict)}(?![A-Za-z0-9_])",
-                         text, re.IGNORECASE) is not None
-    return verdict in text
+def _plain_line(line: str) -> str:
+    """去掉行首的标题/引用/列表标记与成对的强调符号，得到可判定的一行。"""
+    text = (line or "").strip()
+    text = re.sub(r"^>\s*", "", text)
+    text = re.sub(r"^#{1,6}\s*", "", text)
+    text = re.sub(r"^[-+*]\s+", "", text)
+    text = text.strip()
+    text = text.strip("*_` ")
+    return text.strip()
+
+
+def _heading_text(line: str) -> str:
+    """标题行归一化：允许 `##`、`**`、`1.` 前缀与结尾冒号，但正文里的包含不算。"""
+    text = _plain_line(line)
+    text = re.sub(r"^\d+[.)、]\s*", "", text)
+    return text.rstrip("：:").strip().casefold()
+
+
+def _has_section(body: str, variants: tuple[str, ...]) -> bool:
+    wanted = {v.casefold() for v in variants}
+    return any(_heading_text(line) in wanted for line in body.splitlines())
+
+
+def _conclusion_verdicts(text: str) -> list[str]:
+    """按出现顺序返回所有显式结论行里的判决词。"""
+    hits: list[str] = []
+    for line in text.splitlines():
+        match = CONCLUSION_RX.match(_plain_line(line))
+        if match:
+            hits.append(match.group(1).casefold())
+    return hits
+
+
+def _ascii_verdict_hits(text: str) -> list[str]:
+    """没有结论行时的退化判定：只认 ASCII 整词，中文常见词不能全文扫。"""
+    hits = []
+    for verdict in VERDICTS:
+        if verdict.isascii() and re.search(
+            rf"(?<![A-Za-z0-9_]){re.escape(verdict)}(?![A-Za-z0-9_])",
+            text, re.IGNORECASE,
+        ):
+            hits.append(verdict.casefold())
+    return hits
 
 
 def check_deliverable(text: str) -> dict[str, Any]:
@@ -516,33 +651,34 @@ def check_deliverable(text: str) -> dict[str, Any]:
     missing: list[str] = []
     notes: list[str] = []
     body = text or ""
-    low = body.lower()
 
     for key, variants in SECTIONS:
-        if not any(v.lower() in low for v in variants):
+        if not _has_section(body, variants):
             missing.append(f"section:{key}")
 
-    verdict_hit = [v for v in VERDICTS if _verdict_present(body, v)]
+    explicit = _conclusion_verdicts(body)
+    ascii_hits = _ascii_verdict_hits(body) if not explicit else []
+    verdict_hit = list(dict.fromkeys(explicit + ascii_hits))
     if not verdict_hit:
         missing.append("verdict")
     else:
         notes.append("verdict: " + ", ".join(verdict_hit))
 
-    # 判定结论：优先看「结论：X」这一行；没有结论行时，只有全文唯一结论词才算数。
-    explicit = CONCLUSION_RX.search(body)
+    # 多个结论行时取最后一条：备选段里的「结论：Build」不能盖掉最终结论。
     if explicit:
-        verdict = explicit.group(1).lower()
-    elif len(verdict_hit) == 1:
-        verdict = verdict_hit[0].lower()
+        verdict = explicit[-1]
+    elif len(ascii_hits) == 1:
+        verdict = ascii_hits[0]
     else:
         verdict = ""
-        if verdict_hit:
+        if ascii_hits:
             notes.append("结论不唯一：建议补一行「结论：Join/Extend/Fork/Build」；Build 门禁只按结论判定，不按备选段里的提及。")
 
     if verdict in ("build", "新建"):
         line_ok = any(
-            any(line.strip().lower().startswith(p.lower()) for p in GATE_PREFIXES)
+            _plain_line(line).lower().startswith(p.lower())
             for line in body.splitlines()
+            for p in GATE_PREFIXES
         )
         if not line_ok:
             missing.append("gate_line")
@@ -565,41 +701,46 @@ def skill_text(rel: str = "SKILL.md") -> str:
         return fh.read()
 
 
+_VERIFY_MODULE: Any = None
+
+
+def _verify_module() -> Any:
+    """按文件路径加载随包校验器，共用它的围栏/标记解析，避免两份实现漂移。"""
+    global _VERIFY_MODULE
+    if _VERIFY_MODULE is None:
+        spec = importlib.util.spec_from_file_location("rbb_verify_localized", VERIFY_SCRIPT)
+        if spec is None or spec.loader is None:
+            raise RuntimeError("随包校验器不可用")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _VERIFY_MODULE = module
+    return _VERIFY_MODULE
+
+
 def core_rules_block() -> str:
     """取 SKILL.md 里 RBB:INVARIANTS 标记之间的正典规则段（整行锚定 + 跳过围栏示例）。"""
     text = skill_text("SKILL.md")
-    lines = text.splitlines()
-    fenced, in_fence, begins, ends = [], False, [], []
-    for idx, line in enumerate(lines):
-        if line.strip().startswith("```"):
-            in_fence = not in_fence
-            fenced.append(True)
-            continue
-        fenced.append(in_fence)
-        s = line.strip()
-        if not in_fence and s == "<!-- RBB:INVARIANTS:BEGIN -->":
-            begins.append(idx)
-        if not in_fence and s == "<!-- RBB:INVARIANTS:END -->":
-            ends.append(idx)
-    candidates: list[str] = []
-    for b in begins:
-        e = next((x for x in ends if x > b), None)
-        if e is not None:
-            candidates.append("\n".join(lines[b + 1:e]).strip())
-    if not candidates:
-        return ""
-    return max(candidates, key=lambda c: (len(re.findall(r"^(?:\d+)\.\s", c, re.M)), -candidates.index(c)))
+    return _verify_module().extract_block(
+        text, "RBB:INVARIANTS:BEGIN", "RBB:INVARIANTS:END"
+    ) or ""
+
+
+def _looks_like_python(path: str) -> bool:
+    """嵌入式宿主的 sys.executable 可能是宿主进程本身，不能再把它当解释器起一份。"""
+    base = os.path.basename(path).lower()
+    return bool(re.fullmatch(r"(?:python|pythonw)(?:\d+(?:\.\d+)*)?(?:\.exe)?", base)
+                or base in {"py", "py.exe"})
 
 
 def resolve_python(python_exe: str = "") -> str:
-    """优先用宿主自己的解释器；Windows 只有 py 启动器时也能找到。"""
+    """优先用真正的 Python 解释器；Windows 只有 py 启动器时也能找到。"""
     raw = str(python_exe or "").strip()
     if raw:
         return raw
-    if sys.executable and os.path.isfile(sys.executable):
+    if sys.executable and os.path.isfile(sys.executable) and _looks_like_python(sys.executable):
         return sys.executable
     for name in ("python", "python3", "py"):
-        found = shutil.which(name)
+        found = which_path_only(name)
         if found:
             return found
     return "python"

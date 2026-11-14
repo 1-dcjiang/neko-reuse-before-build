@@ -20,6 +20,8 @@
 
 from __future__ import annotations
 
+__version__ = "1.2.6"
+
 import argparse
 import hashlib
 import json
@@ -35,6 +37,7 @@ except Exception:
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_CONTRACT = os.path.join(os.path.dirname(HERE), "localization.contract.json")
+__version__ = "1.2.7"
 
 
 def read_text(path: str) -> str:
@@ -146,6 +149,9 @@ def check_anchors(scope: str, items: list[dict], where: str) -> list[str]:
         ident = item.get("id", "?")
         any_of = item.get("any", [])
         all_of = item.get("all", [])
+        if not any_of and not all_of:
+            missing.append(f"{where}:{ident}(no any/all spec)")
+            continue
         if any_of and not any(s.lower() in low for s in any_of):
             missing.append(f"{where}:{ident}")
         if all_of and not all(s.lower() in low for s in all_of):
@@ -177,13 +183,20 @@ def check_declaration(text: str, decl: dict) -> list[str]:
 def main() -> int:
     ap = argparse.ArgumentParser(description="校验本地化副本是否保住了不可变项")
     ap.add_argument("file", help="待校验的本地化副本")
-    ap.add_argument("--contract", default=DEFAULT_CONTRACT, help="契约文件路径（默认随包）")
+    ap.add_argument("--contract", default=DEFAULT_CONTRACT,
+                    help="契约文件路径；只允许包内 localization.contract.json")
     ap.add_argument("--canonical", action="store_true",
                     help="仅用于包内参考件；对其它路径会被拒绝（rc 2）")
     ap.add_argument("--print-hash", action="store_true",
                     help="只打印不变块哈希（用于更新契约），不做校验")
     ap.add_argument("--quiet", action="store_true", help="只输出结果行")
     args = ap.parse_args()
+
+    # --contract 不能指向任意文件：换成一份空契约（rules_min=0、无锚点）就能跳过全部检查。
+    if os.path.realpath(args.contract) != os.path.realpath(DEFAULT_CONTRACT):
+        print("REFUSED  --contract 只允许指向随包的 localization.contract.json，"
+              "不允许替换成更宽松的契约。", file=sys.stderr)
+        return 2
 
     if not os.path.exists(args.file):
         print(f"FAIL  file not found: {args.file}")
@@ -200,6 +213,18 @@ def main() -> int:
         contract = {}  # --print-hash 用默认标记即可，首次生成契约时还没有它
     except json.JSONDecodeError as exc:
         print(f"FAIL  contract is not valid JSON: {exc}")
+        return 1
+
+    want_hash = str((contract.get("block") or {}).get("canonical_sha256") or "")
+    if not args.print_hash and not re.fullmatch(r"[0-9a-fA-F]{64}", want_hash):
+        print("FAIL  contract 缺少合法的 block.canonical_sha256（64 位十六进制）")
+        return 1
+    try:
+        rules_floor = int(contract.get("rules_min", 0))
+    except (TypeError, ValueError):
+        rules_floor = 0
+    if not args.print_hash and (rules_floor < 1 or not contract.get("must_have")):
+        print("FAIL  contract 的 rules_min 必须 ≥ 1，且 must_have 不能为空")
         return 1
 
     block_cfg = contract.get("block", {})

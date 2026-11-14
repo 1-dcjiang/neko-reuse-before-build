@@ -6,7 +6,7 @@
 
 插件会做三件事：
 
-1. **给规则**：AI 接到「做个 X」时先取回冻结的规则正典，按四步走（检索 → 打分 → 贡献 → 交付）。
+1. **给规则**：AI 接到「做个 X」时先取回固定的规则正典，按四步走（检索 → 打分 → 贡献 → 交付）。
    v0.2.0 起，打分之后多一道**可改性硬闸**（屎山判红就不许 Join，只能 Extend/Fork/Build）；要调用上游能力时按 `references/integration-seam.md` 走**稳定接入口 + 薄适配层**；动手改代码一律**先切分支再开 PR**，不直推默认分支——自己的仓库也一样。
    v0.3.0 起，`references/host-adapters.md` 里的粘贴型提示词都带 `RBB:PROMPT` 锚点和 sha256 登记（`prompt-digests.json`）：把提示词粘到别的聊天 AI 之后，用随包 `scripts/prompt_digest.py --check <文件>` 就能知道装的是哪一版，改过就报 `NO MATCH`。
 2. **给检索**：用你本机的 `gh` 直接查 GitHub，出一张候选表（★、最近推送、语言、许可、open issues）。
@@ -15,7 +15,7 @@
 ## 首次使用
 
 1. 确认 **启用 GitHub 检索** 为开（设置项 `enable_github_scan`）。关掉也能用规则与格式检查，只是不联网。
-2. `gh 可执行文件` 默认 `gh`；装在非标准路径就填绝对路径。
+2. `gh 可执行文件` 只接受 `gh` / `gh.exe`，从 PATH 解析绝对路径；不支持填任意路径或 `.bat` / `.cmd`。
 3. 点 **自检规则完整性**：
    - `rule_sha256 = fa0f991f…bc93` → 规则本体没被改动；
    - `skill_exit_code = 0` 且输出含 `PASS … verbatim 5/5` → 随包校验通过。
@@ -39,7 +39,7 @@
 
 **检索成功但 0 命中**：这是「这一组词没搜到」，不是「不存在」。换英文同义词、降星数门槛、放宽时间窗再跑一轮。
 
-**检索失败（code=2 / 3）**：`gh` 没装、没登录、或主机不通。修 `gh auth status` 后重跑，或按 `references/discovery-playbook.md` 用网页检索串人工查。**此时不得断言没有同类项目。**
+**检索失败（code=2 / 3 / 4）**：`gh` 没装、没登录、主机不通，或预算（code=4）用完。修 `gh auth status` / 增大 `scan_timeout` 后重跑，或按 `references/discovery-playbook.md` 用网页检索串人工查。**此时不得断言没有同类项目。**
 
 **格式检查不通过**：`rbb_check` 会列出缺哪一段。补齐再交付；判定新建时首行必须有 `不可复用原因 / Not reusable because:`。
 

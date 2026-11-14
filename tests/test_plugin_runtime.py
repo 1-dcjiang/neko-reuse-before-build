@@ -120,6 +120,31 @@ class TestPluginRuntime(unittest.TestCase):
         self.assertIn("code=2", msg)
         self.assertIn("不等于没有同类项目", msg)
 
+    def test_scan_explicit_zero_stars_and_timeout_are_forwarded(self):
+        """stars=0 是合法值（不限），不能被 `or` 当成没传而回默认 50。"""
+        plugin, _ = asyncio.run(self._lifecycle(self.mod.ReuseBeforeBuildPlugin, {}))
+        seen = {}
+
+        def fake_candidates(kws, stars, limit, since, gh_binary, timeout, updated_days):
+            seen.update(stars=stars, limit=limit, timeout=timeout, updated_days=updated_days)
+            return {
+                "code": 0, "ok": True, "keywords": kws, "rows": [], "table": "",
+                "note": "", "stars": stars, "updated_since": since, "limit": limit,
+                "failed": [], "skipped": [], "reason": "", "hint": "",
+            }
+
+        with unittest.mock.patch.object(
+            self.mod.rbb_core, "search_candidates", side_effect=fake_candidates
+        ):
+            res = asyncio.run(plugin.rbb_scan(
+                keywords=["video clip"], stars=0, limit=0, timeout=7
+            ))
+        self.assertTrue(res.is_ok(), _err_text(res))
+        self.assertEqual(seen["stars"], 0)
+        self.assertEqual(seen["limit"], 1)
+        self.assertEqual(seen["timeout"], 7)
+        self.assertEqual(seen["updated_days"], 365)
+
     def test_invalid_gh_binary_falls_back_with_warning(self):
         """配置里写任意程序名不能再变成执行入口：回退 gh，并在 status 里给出 warning。"""
         plugin, _ = asyncio.run(self._lifecycle(

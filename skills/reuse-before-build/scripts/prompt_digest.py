@@ -21,6 +21,8 @@ UTF-8 文本、LF 换行、去掉每行行尾空白、去掉首尾空行。
 
 from __future__ import annotations
 
+__version__ = "1.2.7"
+
 import argparse
 import hashlib
 import json
@@ -213,7 +215,8 @@ def cmd_check(args) -> int:
     got, chars = digest_of(text)
     hits: list[dict] = []
     for entry in entries:
-        for version in entry.get("versions", []):
+        versions = entry.get("versions", [])
+        for idx, version in enumerate(versions):
             if version.get("sha256") == got:
                 hits.append(
                     {
@@ -222,6 +225,7 @@ def cmd_check(args) -> int:
                         "version": version.get("version", "?"),
                         "released": version.get("released", ""),
                         "chars": chars,
+                        "current": idx == 0,
                     }
                 )
 
@@ -231,11 +235,16 @@ def cmd_check(args) -> int:
               "别当成功——重新拷一份原文，或对照 host-adapters.md 的当前版本。", file=sys.stderr)
         return 1
 
+    stale = [h for h in hits if not h["current"]]
     for hit in hits:
         released = f" released={hit['released']}" if hit["released"] else ""
-        print(f"MATCH  id={hit['id']} version={hit['version']}{released} chars={hit['chars']}  sha256={got}")
+        state = "CURRENT" if hit["current"] else "STALE"
+        print(f"MATCH  {state}  id={hit['id']} version={hit['version']}{released} chars={hit['chars']}  sha256={got}")
         if hit["label"]:
             print(f"       {hit['label']}")
+    if stale:
+        print("这是历史版本，不是随包当前版；按 host-adapters.md 重新拷一份当前提示词。", file=sys.stderr)
+        return 1
     return 0
 
 

@@ -161,6 +161,39 @@ class TestSearchWrapper(unittest.TestCase):
         self.assertTrue(argv[-1].startswith("-foo "))
         self.assertLess(argv.index("--archived=false"), argv.index("--"))
 
+    def test_search_args_use_inclusive_star_and_date_bounds(self):
+        argv = rbb_core.search_args("clip tool", 50, "2025-01-01", 6)
+        self.assertIn("clip tool stars:>=50 pushed:>=2025-01-01", argv[-1])
+
+    def test_keyword_with_nul_or_qualifier_is_rejected_before_search(self):
+        for bad in ("bad\x00kw", "clip stars:>999999", "clip user:someone", "x" * 201):
+            res = rbb_core.search_candidates([bad], gh_binary="gh")
+            self.assertEqual(res["code"], 2, bad)
+            self.assertIn("关键词", res["reason"])
+
+    def test_scan_uses_resolved_absolute_gh_path(self):
+        """只把 `gh` 字面量交给 subprocess 仍可能被当前目录同名文件劫持。"""
+        seen = {}
+
+        def fake_scan(kw, exe, stars, since, limit, timeout):
+            seen.update(exe=exe)
+            return [], ""
+
+        with unittest.mock.patch.object(
+            rbb_core, "resolve_gh_path", return_value="C:/Tools/gh.exe"
+        ):
+            with unittest.mock.patch.object(rbb_core, "auth_ok", return_value=(True, "")):
+                with unittest.mock.patch.object(rbb_core, "_scan_one", side_effect=fake_scan):
+                    res = rbb_core.search_candidates(["video clip"], timeout=5)
+        self.assertEqual(res["code"], 0)
+        self.assertEqual(seen["exe"], "C:/Tools/gh.exe")
+
+    def test_embedded_nul_from_subprocess_is_a_runtime_error(self):
+        with unittest.mock.patch.object(rbb_core, "_gh", side_effect=ValueError("embedded null byte")):
+            rows, err = rbb_core._scan_one("k", "gh", 50, "2025-01-01", 6, 5)
+        self.assertEqual(rows, [])
+        self.assertIn("gh 参数非法", err)
+
     def test_recorded_gh_json_parses_into_rows(self):
         """契约测试：直接喂录好的 `gh search repos --json` 输出，不 mock 解析函数。"""
         path = os.path.join(ROOT, "tests", "fixtures", "gh_search_repos.json")
@@ -213,6 +246,27 @@ class TestGhHardening(unittest.TestCase):
         self.assertEqual(res["code"], 3)
         self.assertEqual(len(seen), 2)
         self.assertLess(seen[1], 5.0, f"第二个关键词没有共享总预算：{seen}")
+
+    def test_budget_skips_are_not_reported_as_search_failures(self):
+        """预算耗尽的 skip 不是「gh 坏了」：失败与跳过必须分开，报 code=4。"""
+        clock = [0.0]
+
+        def fake_clock():
+            return clock[0]
+
+        def fake_scan(kw, exe, stars, since, limit, timeout):
+            clock[0] += 4.9
+            return [], "boom"
+
+        with unittest.mock.patch.object(rbb_core, "auth_ok", return_value=(True, "")):
+            with unittest.mock.patch.object(rbb_core, "_scan_one", side_effect=fake_scan):
+                res = rbb_core.search_candidates(["a", "b", "c"], timeout=5, clock=fake_clock)
+        self.assertEqual(res["code"], 4, res)
+        self.assertEqual(res["failed"], ["a"])
+        self.assertEqual(res["skipped"], ["b", "c"])
+        self.assertIn("预算", res["reason"])
+        self.assertNotIn("全部关键词检索失败", res["reason"])
+        self.assertNotIn(rbb_core.EMPTY_HINT, res["note"])
 
     def test_non_gh_executable_is_rejected(self):
         self.assertEqual(rbb_core.resolve_gh_executable("evil-payload.exe"), "")
@@ -295,6 +349,12 @@ class TestGhHardening(unittest.TestCase):
         self.assertEqual(seen["since"], rbb_core.default_since(365))
         self.assertIn("updated_since", res["note"])
 
+    def test_basic_compact_date_is_not_silently_accepted(self):
+        """`20250101` 在部分 Python 版本能被 fromisoformat 吃掉，但不是约定格式。"""
+        _, _, since, note = rbb_core.normalize_scan_params(50, 6, "20250101", 365)
+        self.assertEqual(since, rbb_core.default_since(365))
+        self.assertIn("YYYY-MM-DD", note)
+
     def test_api_key_and_bearer_are_redacted(self):
         msg = rbb_core.redact_text("api_key=abc123 Bearer sk-abcdefghij")
         self.assertNotIn("abc123", msg)
@@ -304,10 +364,21 @@ class TestGhHardening(unittest.TestCase):
     def test_python_resolver_falls_back_to_py_launcher(self):
         with unittest.mock.patch.object(rbb_core.sys, "executable", ""):
             with unittest.mock.patch.object(
-                rbb_core.shutil, "which",
+                rbb_core, "which_path_only",
                 side_effect=lambda name: "C:/Windows/py.exe" if name == "py" else None,
             ):
                 self.assertEqual(rbb_core.resolve_python(), "C:/Windows/py.exe")
+
+    def test_embedded_host_executable_is_not_used_as_python(self):
+        """嵌入式宿主的 sys.executable 是宿主进程，不能再起一份它当解释器。"""
+        with unittest.mock.patch.object(
+            rbb_core.sys, "executable", r"C:/Apps/N.E.K.O/neko-host.exe"
+        ):
+            with unittest.mock.patch.object(
+                rbb_core, "which_path_only",
+                side_effect=lambda name: "C:/Python312/python.exe" if name == "python" else None,
+            ):
+                self.assertEqual(rbb_core.resolve_python(), "C:/Python312/python.exe")
 
 
     GOOD = """## 找到了什么
@@ -385,6 +456,61 @@ class TestGhHardening(unittest.TestCase):
         res = rbb_core.check_deliverable(text)
         self.assertFalse(res["ok"])
         self.assertIn("gate_line", res["missing"])
+
+    def test_chinese_body_words_do_not_count_as_a_verdict(self):
+        """正文出现「新建文件」「加入」不是结论；没有结论行就该报 missing，不得误触发门禁。"""
+        text = self.GOOD.replace("结论：Join。", "").replace(
+            "备选：fork 自维护。", "备选：维护者失联时再看。"
+        ).replace(
+            "基于字幕的高光片段挑选。", "这里会新建文件，并把补丁加入上游。"
+        )
+        res = rbb_core.check_deliverable(text)
+        self.assertIn("verdict", res["missing"])
+        self.assertNotIn("gate_line", res["missing"])
+
+    def test_chinese_conclusion_join_is_not_shadowed_by_body_words(self):
+        text = self.GOOD.replace(
+            "基于字幕的高光片段挑选。", "这里会新建文件、加入上游，但最终结论仍是复用。"
+        )
+        res = rbb_core.check_deliverable(text)
+        self.assertTrue(res["ok"], res["missing"])
+        self.assertNotIn("gate_line", res["missing"])
+
+    def test_markdown_decorated_gate_and_build_conclusion_pass(self):
+        text = self.GOOD.replace(
+            "结论：Join。",
+            "**不可复用原因：** 许可为 GPL-3.0，与闭源要求冲突。\n\n> 结论：**Build**。",
+        )
+        res = rbb_core.check_deliverable(text)
+        self.assertTrue(res["ok"], res["missing"])
+
+    def test_last_conclusion_wins_over_earlier_alternative(self):
+        """备选段先写「结论：Build」时，不能被它盖掉最后的 Join。"""
+        text = self.GOOD.replace(
+            "结论：Join。",
+            "备选方案先记：结论：Build，理由待补。\n\n结论：Join。",
+        )
+        res = rbb_core.check_deliverable(text)
+        self.assertTrue(res["ok"], res["missing"])
+        self.assertNotIn("gate_line", res["missing"])
+
+    def test_bold_headings_and_numbered_headings_are_accepted(self):
+        text = self.GOOD
+        for old, new in (
+            ("## 找到了什么", "**找到了什么**"),
+            ("## 为什么选它", "### 1. 为什么选它"),
+            ("## 我要加什么", "**我要加什么：**"),
+            ("## 备选与风险", "> ### 备选与风险"),
+        ):
+            text = text.replace(old, new)
+        res = rbb_core.check_deliverable(text)
+        self.assertTrue(res["ok"], res["missing"])
+
+    def test_section_names_inside_body_do_not_count(self):
+        text = self.GOOD.replace("## 为什么选它", "为什么选它不是一句话能说清的")
+        res = rbb_core.check_deliverable(text)
+        self.assertFalse(res["ok"])
+        self.assertIn("section:why", res["missing"])
 
 
 class TestTable(unittest.TestCase):

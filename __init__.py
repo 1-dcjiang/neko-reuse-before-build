@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 
 from plugin.sdk.plugin import (
@@ -33,7 +34,7 @@ except ImportError:  # pytest 把仓库根当包直接导入 __init__.py 时的�
 _logger = logging.getLogger("N.E.K.O.Plugin_reuse_before_build.plugin.reuse_before_build")
 
 _RULES_PREAMBLE = (
-    "以下是本插件随包冻结的规则正典（与上游 reuse-before-build 逐字一致）。"
+    "以下是本插件随包固定的规则正典（与上游 reuse-before-build 逐字一致）。"
     "它是**规则**不是建议：命中后按它执行，不要自行删条、合并或改编号。"
 )
 
@@ -71,6 +72,11 @@ class ReuseBeforeBuildPlugin(NekoPluginBase):
 
     @lifecycle(id="shutdown")
     async def on_shutdown(self, **_):
+        if self._hash_task and not self._hash_task.done():
+            self._hash_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._hash_task
+        self._hash_task = None
         return Ok({"status": "shutdown"})
 
     @lifecycle(id="reload")
@@ -117,6 +123,29 @@ class ReuseBeforeBuildPlugin(NekoPluginBase):
                 self.logger.warning("规则哈希计算失败：%s", err)
         except Exception as e:
             self.logger.warning("规则哈希计算异常：%s", e)
+
+    async def _collect_checks(self) -> tuple[bool, str, dict]:
+        """gh 状态、随包校验、规则哈希并行跑；串行最坏会等三份超时。"""
+        probe = asyncio.create_task(self._probe_hash()) if not self._rule_hash else None
+        gh_task = asyncio.create_task(
+            asyncio.to_thread(rbb_core.auth_ok, self._gh_binary, self._timeout)
+        )
+        bundle_task = asyncio.create_task(
+            asyncio.to_thread(rbb_core.verify_localized, rbb_core.SKILL_MD,
+                              self._python, None, self._timeout)
+        )
+        tasks = [gh_task, bundle_task]
+        if probe is not None:
+            tasks.append(probe)
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        gh_res, bundled = results[0], results[1]
+        if isinstance(gh_res, BaseException):
+            gh_ok, gh_why = False, f"gh 状态检查异常：{gh_res}"
+        else:
+            gh_ok, gh_why = gh_res
+        if isinstance(bundled, BaseException):
+            bundled = {"rc": -1, "out": "", "err": f"随包校验异常：{bundled}"}
+        return gh_ok, gh_why, bundled
 
     @staticmethod
     def _params(extra) -> dict:
@@ -182,9 +211,15 @@ class ReuseBeforeBuildPlugin(NekoPluginBase):
             return Ok({"section": "flow", "flow": flow,
                        "verdict_order": ["Join", "Extend", "Fork", "Build"],
                        "note": "完整档走四步；一次性小脚本走快速档，回复固定三行：复用 / 改动 / 风险。"})
+        block = rbb_core.core_rules_block()
+        if not block:
+            return Err(SdkError(
+                "随包规则块为空（SKILL.md 缺 RBB:INVARIANTS 标记或文件损坏）。"
+                "重装插件；不要在没有规则的情况下继续生成新项目。"
+            ))
         return Ok({
             "section": "rules",
-            "rules": rbb_core.core_rules_block(),
+            "rules": block,
             "verdict_order": ["Join", "Extend", "Fork", "Build"],
             "preamble": _RULES_PREAMBLE,
             "canonical_sha256": self._rule_hash or "(正在计算，稍后调 rbb_status 查看)",
@@ -196,7 +231,7 @@ class ReuseBeforeBuildPlugin(NekoPluginBase):
             "用本机 gh CLI 检索 GitHub 上的同类仓库，返回去重后的候选表（★/最近推送/语言/许可/open issues/URL）。"
             "何时用：进入 Discovery 阶段、或需要证明「有没有现成的」时。前置：本机装了 GitHub CLI 且已登录。"
             "限制：只读搜索，不提 PR、不发 issue、不改任何远端状态；最多 5 个关键词，单次每个关键词最多 10 条。"
-            "⚠️ 返回 code=2/3 表示「没查成」，绝不等于「不存在」：此时必须换检索串或让用户开联网，不要断言没有同类项目。"
+            "⚠️ 返回 code=2/3/4 表示「没查成」（code=4 是预算耗尽），绝不等于「不存在」：此时必须换检索串或让用户开联网，不要断言没有同类项目。"
         ),
         parameters={
             "type": "object",
@@ -206,15 +241,16 @@ class ReuseBeforeBuildPlugin(NekoPluginBase):
                     "items": {"type": "string"},
                     "description": "1–5 个检索串，英文效果最好（如 \"obsidian sync plugin\"、\"video auto clip highlight\"）",
                 },
-                "stars": {"type": "integer", "description": "星数下限，默认取插件设置（50）"},
+                "stars": {"type": "integer", "description": "星数下限，默认取插件设置（50）；显式传 0 表示不限"},
                 "limit": {"type": "integer", "description": "每个关键词返回条数，1–10，默认取插件设置（6）"},
                 "updated_since": {"type": "string", "description": "最近推送日期下限 YYYY-MM-DD，默认一年前"},
+                "timeout": {"type": "integer", "description": "本次检索总预算秒数（5–300），默认取插件设置（30）"},
             },
             "required": ["keywords"],
         },
     )
-    async def rbb_scan(self, keywords=None, stars: int = 0, limit: int = 0,
-                       updated_since: str = "", **_):
+    async def rbb_scan(self, keywords=None, stars: int | None = None, limit: int | None = None,
+                       updated_since: str = "", timeout: int | None = None, **_):
         params = self._params(_)
         if not self._enable_scan:
             return Err(SdkError(
@@ -227,14 +263,29 @@ class ReuseBeforeBuildPlugin(NekoPluginBase):
             return Err(SdkError("缺少检索关键词 keywords。给 1–5 个英文检索串再调一次。"))
         if len(kws) > 5:
             return Err(SdkError(f"关键词给了 {len(kws)} 个，上限 5 个。合并同义词后再试。"))
-        st = self._as_int(stars or params.get("stars"), self._stars)
-        lm = min(10, max(1, self._as_int(limit or params.get("limit"), self._limit)))
+        st = max(0, self._as_int(
+            stars if stars is not None else params.get("stars"), self._stars
+        ))
+        lm = min(10, max(1, self._as_int(
+            limit if limit is not None else params.get("limit"), self._limit
+        )))
         since = str(updated_since or params.get("updated_since") or "").strip()
+        raw_timeout = timeout if timeout is not None else params.get("timeout", self._timeout)
+        total = max(5, min(300, self._as_int(raw_timeout, self._timeout)))
 
-        res = await asyncio.to_thread(
-            rbb_core.search_candidates,
-            kws, st, lm, since, self._gh_binary, self._timeout, self._updated_days,
-        )
+        try:
+            res = await asyncio.wait_for(
+                asyncio.to_thread(
+                    rbb_core.search_candidates,
+                    kws, st, lm, since, self._gh_binary, total, self._updated_days,
+                ),
+                timeout=total + 5,
+            )
+        except asyncio.TimeoutError:
+            return Err(SdkError(
+                f"检索外层超时（>{total + 5}s）：预算 {total}s 已用尽，未完成。"
+                "不要据此断言没有同类项目；增大 timeout 或减少关键词后重跑。"
+            ))
         payload = {
             "code": res["code"],
             "ok": res["ok"],
@@ -243,6 +294,7 @@ class ReuseBeforeBuildPlugin(NekoPluginBase):
             "updated_since": res.get("updated_since", since),
             "table": res["table"],
             "count": len(res["rows"]),
+            "skipped": res.get("skipped", []),
             "candidates": [
                 {
                     "repo": r.get("full_name"),
@@ -346,11 +398,7 @@ class ReuseBeforeBuildPlugin(NekoPluginBase):
         parameters={"type": "object", "properties": {}, "required": []},
     )
     async def rbb_status(self, **_):
-        if not self._rule_hash:
-            await self._probe_hash()
-        gh_ok, gh_why = await asyncio.to_thread(rbb_core.auth_ok, self._gh_binary, self._timeout)
-        bundled = await asyncio.to_thread(rbb_core.verify_localized, rbb_core.SKILL_MD,
-                                            self._python, None, self._timeout)
+        gh_ok, gh_why, bundled = await self._collect_checks()
         return Ok({
             "plugin": "reuse_before_build",
             "rule_sha256": self._rule_hash or "无法计算",
@@ -381,11 +429,7 @@ class ReuseBeforeBuildPlugin(NekoPluginBase):
     @ui.action(id="self_check", label="自检规则完整性", tone="primary", refresh_context=True)
     async def self_check(self, **_):
         """给用户一个可点的自检：确认随包规则没被改动、gh 能用。"""
-        if not self._rule_hash:
-            await self._probe_hash()
-        bundled = await asyncio.to_thread(rbb_core.verify_localized, rbb_core.SKILL_MD,
-                                            self._python, None, self._timeout)
-        gh_ok, gh_why = await asyncio.to_thread(rbb_core.auth_ok, self._gh_binary, self._timeout)
+        gh_ok, gh_why, bundled = await self._collect_checks()
         self.report_status({
             "status": "completed" if bundled["rc"] == 0 else "failed",
             "progress": 100,

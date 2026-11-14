@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.3.6 — 2026-11-14
+
+按第四轮深审（7.5 / 10）修的 A/B、中 1–7 与轻量项：
+
+- **A · 中文判决词不再全文子串匹配**：`check_deliverable` 只从 `结论：Join/Extend/Fork/Build`（含 `加入/扩展/分叉/新建`）这类结论行取判决；正文出现「新建文件」「加入上游」不再被当成结论。没有结论行时只对 ASCII 判决词做整词退化判定，中文常见词不做全文扫描。
+- **B · 预算耗尽单独报 `code=4`**：`skipped` 与 `failed` 分开记录；全部关键词因总预算用完未检索时返回 `code=4` + `BUDGET_HINT`，不再误报 `code=3`「全部检索失败」，也不再输出「0 命中」提示。部分跳过时 `code=0` 并在 note 里说明。
+- **中 1 · Build 门禁识别 Markdown 装饰**：`**不可复用原因：**`、`> 不可复用原因`、`## 不可复用原因` 现在都能命中；门禁仍只认行首。
+- **中 2 · 多结论行取最后一条**：备选段先写 `结论：Build` 不会再盖掉最终的 `结论：Join`。
+- **中 3 · 四段标题按标题行匹配**：`## 找到了什么`、`**找到了什么**`、`### 1. 找到了什么`、`> ### 备选与风险` 都算；正文里包含同名短语不算。
+- **中 4 · 关键词校验**：拒绝空、>200 字符、NUL/控制字符与 `stars:/pushed:/archived:/user:/org:` 等限定符；`_scan_one` / `gh_json` 把 `ValueError` 转成可读错误。
+- **中 5 · 超时预算**：`rbb_scan` 新增 `timeout`（5–300 秒）并透传到内核，外层 `wait_for(total + 5)`；`rbb_status` / `self_check` 的哈希、校验、gh 检查改为并行，不再串行等三份超时。
+- **中 6 · `resolve_python` 不认嵌入式宿主**：只有当 `sys.executable` 的文件名像 Python（`python*` / `py`）时才使用，否则从 PATH 找真解释器。
+- **中 7 · gh 绝对路径**：新增 `which_path_only()`，过滤 PATH 空条目与当前目录，检索只把解析出的绝对路径交给 subprocess；`stars:` / `pushed:` 改为 `>=` 闭区间。
+- **轻量项**：`rbb_scan` 的 `stars=0` / `limit=0` 不再被 `or` 当成没传；`on_shutdown` 取消后台哈希任务；`rbb_rules` 在规则块为空时返回 Err；`updated_since` 只接受严格 `YYYY-MM-DD`（`20250101` 会回退并写 note）；围栏解析统一复用随包 `verify_localized.py`，不再维护第二份。
+- **文档**：删除「哈希防篡改」的暗示，明确哈希只覆盖不变块，保留锚点的重写仍需人读 `kept / changed`。
+- **同步上游 v1.2.7**：`SKILL.md`、`references/repo-triage.md` 与三份 `scripts/` 对齐已发布的 v1.2.7（判定表、Untrusted repository content、契约锁、`--timeout` 等）。
+- 测试：80 passed（离线 67 + SDK 桩 10 + 市场 smoke 3），`ruff check .` 全绿。新增结论行/正文误命中、Markdown 门禁、多结论、标题行、NUL/限定符/超长关键词、预算跳过、绝对 gh 路径、`ValueError`、紧凑日期、嵌入式 Python、`stars=0` 与工具 timeout 透传等回归。
+- 规则本体与契约哈希 `fa0f991f…bc93` 未动。
+
 ## 0.3.5 — 2026-11-14
 
 按第三轮复查（8.3 / 10）补的三处 + 新问题：
