@@ -89,9 +89,83 @@ python plugin/plugins/reuse_before_build/scripts/vendor_release.py verify-tree \
 `verify-tree` 校验清单内文件，不拒绝下游额外的配置或运行数据；规则正典仍需由插件自检，
 两者不能互相替代。
 
+## 5. 作为参考件 vendor 到非 N.E.K.O 仓库
+
+workshop、forge 等下游仓库可以把本包当作规则与校验工具的只读依赖，不必安装或加载
+N.E.K.O 插件入口。目标路径由下游自行约定，例如 workshop 使用 `references/rbb/`。
+把 `extracted/neko-reuse-before-build-v0.3.9/` **里面的全部内容**复制到该目录，不再套版本目录：
+
+```text
+references/rbb/
+├─ VENDOR-SHA256SUMS.txt
+├─ scripts/
+│  └─ vendor_release.py
+└─ skills/
+   └─ reuse-before-build/
+      ├─ SKILL.md
+      ├─ localization.contract.json
+      └─ scripts/
+         └─ verify_localized.py
+```
+
+- 实际只读取 `skills/reuse-before-build/` 中的规则与工具，不注册
+  `ReuseBeforeBuildPlugin`；但清单内的其他文件也不能因此删除，否则 `verify-tree` 会报缺失或哈希不匹配。
+- vendor 目录保持原样。下游在目录外的 README 或依赖清单记录版本、tag 和 ZIP SHA-256，
+  例如 `rbb v0.3.9, zip sha256=…`；本地扩展放到独立文件，不改包内规则或清单。
+- `verify_localized.py` 会从脚本所在位置寻找同包的 `localization.contract.json`，并拒绝用
+  `--contract` 指向其他契约。请原地运行包内脚本，不要把它单独复制到其他目录后使用。
+
+## 6. 在下游 CI 中校验
+
+以下示例在下游仓库根目录运行，vendor 目标为 `references/rbb`；如果下游创建了
+`docs/rbb-workshop.md` 扩展副本，则一并校验。CI 使用 **Python 3.11+**，其中
+`vendor_release.py` 使用标准库 `tomllib`。这些校验只用 Python 标准库，不需要 `gh`。
+
+```yaml
+- name: rbb vendor integrity
+  shell: bash
+  run: |
+    RBB=references/rbb
+    V="$RBB/skills/reuse-before-build/scripts/verify_localized.py"
+    python "$RBB/scripts/vendor_release.py" verify-tree "$RBB"
+    python "$V" "$RBB/skills/reuse-before-build/SKILL.md" --canonical --quiet
+    # 下游每份复制或翻译的规则文档各跑一次；没有副本则省略下一行。
+    python "$V" docs/rbb-workshop.md --quiet
+```
+
+`--canonical` 只能用于契约登记的包内参考件，不能用于下游副本；副本必须带声明行并接受完整校验。
+`verify_localized.py` 的退出码为：`0` 表示 PASS，`1` 表示 FAIL（输出缺失项，含 `MISSING`），
+`2` 表示用法错误或拒绝（例如对包外文件使用 `--canonical`、替换契约）。任何非零退出码都应使 CI 失败；
+`verify-tree` 的缺失或哈希错误同样不得忽略。
+
+## 7. 编写下游扩展或本地化副本
+
+只引用、不复述时，直接链接 vendor 中的 `SKILL.md`，不复制规则块；这种用法不需要创建本地化副本，
+也不执行上一节针对 `docs/rbb-workshop.md` 的那条命令。需要复制、翻译或增加宿主规则时，另建文件，
+例如 `docs/rbb-workshop.md`，并满足以下要求：
+
+1. 保留 `<!-- RBB:INVARIANTS:BEGIN -->` 与 `<!-- RBB:INVARIANTS:END -->` 包围的不变块。
+   逐字复制即为 verbatim；翻译时在块内加入 `RBB:INVARIANTS:LANG: zh`。
+2. 块内规则从第 0 列按 `1.` 到 `N.` 连续编号，条数不得少于契约的 `rules_min`（当前为 5），
+   并保留每条规则的中英文锚点及原意；不能只留锚点短语而删除实质约束。
+3. 全文必须满足 `localization.contract.json` 的全部 `must_have` 语义锚点。若文件含 frontmatter，
+   `name` 使用不超过 64 字符的小写字母／数字／连字符格式，`description` 必填且不超过 1024 字符。
+4. 在文件最后 8 个非空、非代码块行之内放置声明行，包含 `host`、`kept`、`changed`、
+   `unsupported` 四项。`unsupported` 不得掩盖实际缺失；宿主确实不支持时写明限制与原因。
+
+```text
+localized: host=neko-plugin-workshop | kept=全部不变项 | changed=新增 W1-W3 产品层检查 | unsupported=无
+```
+
+建议在下游 `docs/examples/` 附一份实际通过上述命令的最小示例，让 CI 同时验证示例，而不是只写文字说明。
+契约与脚本以 vendor 中的版本为准，不要另行复制一份宽松契约来绕过检查。
+
 ## 更新与维护约定
 
 - 每次升级固定一个新的 tag，重新核对 ZIP 与文件级清单，记录升级版本和哈希。
+- 升级顺序：换 tag 与附件名 → `verify-archive` → 完整替换 vendor 目录 → 运行 CI 复检。
+  上游不变块哈希变化时，下游 verbatim 副本会报 `hash_mismatch`，必须同步新块并复核翻译与扩展规则，
+  不能自行修改哈希来放行。
 - 本地补丁与上游升级分开提交，便于下次比较；不要直接改 `VENDOR-SHA256SUMS.txt`
   来掩盖文件变化。确需修改时，应重新构建包并生成新清单。
 - 本插件运行不依赖第三方 Python 包；GitHub 检索使用 PATH 中的 `gh`，没有 `gh`
