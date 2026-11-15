@@ -214,7 +214,8 @@ class ReuseBeforeBuildPlugin(NekoPluginBase):
         rules = rbb_core.mandatory_rules()
         if not block or not rules:
             return Err(SdkError(
-                "随包规则块为空（SKILL.md 缺 RBB:INVARIANTS 标记或文件损坏）。"
+                "随包规则块或关键章节为空（SKILL.md 缺 RBB:INVARIANTS 标记，"
+                "或缺 Step 2/3、Hard constraints、Untrusted repository content 等章节，或文件损坏）。"
                 "重装插件；不要在没有规则的情况下继续生成新项目。"
             ))
         return Ok({

@@ -19,6 +19,7 @@ SKILL_DIR = os.path.join(ROOT, "skills", "reuse-before-build")
 SKILL = os.path.join(SKILL_DIR, "SKILL.md")
 ZH = os.path.join(SKILL_DIR, "references", "zh-guide.md")
 VERIFY = os.path.join(SKILL_DIR, "scripts", "verify_localized.py")
+VENDOR = os.path.join(ROOT, "docs", "vendor.md")
 DECL = "\nlocalized: host=test | kept=all | changed=packaging | unsupported=none\n"
 
 
@@ -113,6 +114,34 @@ class TestDeliverableContract(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertIn("quick:searches", result["missing"])
 
+    def test_quick_lane_no_hit_accepts_leading_build_gate(self):
+        text = (
+            "不可复用原因：没有同类项目。\n"
+            "未找到同类项目；检索了 GitHub、PyPI、awesome-lists。"
+        )
+        result = core.check_deliverable(text)
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["lane"], "quick-no-match")
+        self.assertEqual(result["verdict"], "Build")
+        empty = "不可复用原因：\n未找到同类项目；检索了 GitHub、PyPI。"
+        self.assertIn("gate_reason", core.check_deliverable(empty)["missing"])
+
+    def test_contract_section_baseline_cannot_be_removed_or_weakened(self):
+        verify = load_module("verify_localized_deep_review", VERIFY)
+        contract = json.loads(read(os.path.join(SKILL_DIR, "localization.contract.json")))
+        self.assertEqual(verify.check_contract_baseline(contract), [])
+        contract["critical_sections"] = [
+            item for item in contract["critical_sections"] if item["id"] != "step2"
+        ]
+        missing = verify.check_contract_baseline(contract)
+        self.assertIn("critical_sections:step2", missing)
+        contract = json.loads(read(os.path.join(SKILL_DIR, "localization.contract.json")))
+        contract["critical_sections"][0]["min_chars"] = 1
+        self.assertIn(
+            "critical_sections_floor:step2(1<500)",
+            verify.check_contract_baseline(contract),
+        )
+
     def test_build_without_candidate_table_does_not_invent_modifiability(self):
         text = FULL.replace(
             "| Repo | Date |\n|---|---|\n| owner/demo | 2026-10-01 |",
@@ -154,6 +183,22 @@ class TestRulesAndDocs(unittest.TestCase):
     def test_missing_mandatory_section_returns_empty_payload(self):
         with mock.patch.object(core, "skill_section", side_effect=lambda name: "" if name == "Hard constraints" else "body"):
             self.assertEqual(core.mandatory_rules(), "")
+
+    def test_vendor_doc_documents_critical_sections(self):
+        text = read(VENDOR)
+        for needle in (
+            "critical_sections",
+            "Step 2 — Evaluate",
+            "Step 3 — Contribute",
+            "Hard constraints",
+            "Untrusted repository content",
+            "500", "500", "350", "180",
+            "section_short",
+            "section_anchor",
+            "--print-section-hash",
+        ):
+            with self.subTest(needle=needle):
+                self.assertIn(needle, text)
 
     def test_chinese_and_english_verdict_tables_agree(self):
         english, chinese = read(SKILL), read(ZH)
@@ -210,6 +255,19 @@ class TestLocalizedVerifier(unittest.TestCase):
         proc = self.verify_text(SKILL, mutate)
         self.assertEqual(proc.returncode, 1, proc.stdout)
         self.assertIn("section_short:untrusted", proc.stdout)
+
+    def test_missing_critical_section_reports_actionable_id(self):
+        def mutate(text):
+            return re.sub(
+                r"(?ms)(## Step 2 — Evaluate\n).*?(?=\n## Step 3 — Contribute)",
+                "",
+                text,
+                count=1,
+            )
+
+        proc = self.verify_text(SKILL, mutate)
+        self.assertEqual(proc.returncode, 1, proc.stdout)
+        self.assertIn("section:step2", proc.stdout)
 
     def test_new_required_anchors_cannot_be_deleted(self):
         cases = {

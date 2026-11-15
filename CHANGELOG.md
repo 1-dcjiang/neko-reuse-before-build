@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.12 — 2026-11-15
+
+按《rbb-bd72178-增量核对-1114191452》修 v0.3.11 留下的文档与契约同步缺口：
+
+- **vendor 文档补关键章节要求**：`docs/vendor.md` 第 7 节新增第 5 条，明确 Step 2 / Step 3 / Hard constraints / Untrusted repository content 的标题、500/500/350/180 字符下限、章节锚点与 `section_short` / `section_anchor` 报错；并用 `--print-section-hash` 重算章节哈希。
+- **章节哈希钉进代码**：`verify_localized.py` 新增 `CANONICAL_SECTION_SHA256` 与 `CANONICAL_SECTION_FLOORS`；只改契约删掉 `critical_sections`、降低长度或换掉哈希都会在启动时被拒绝。
+- **新增 `--print-section-hash`**：可一次打印四个关键章节的正文 SHA-256，避免升级 SKILL.md 时手算。
+- **校验器文件头与版本同步**：由“四道闸”改为五道，`__version__` 升到 `1.2.8`。
+- **Build 快速档允许门禁行在前**：先写 `不可复用原因：…` 再写“未找到同类项目；检索了…”不再掉进完整档并误报缺四段；门禁原因为空仍报 `gate_reason`。
+- **缺章报错文案补齐**：`rbb_rules` 的 Err 现在同时提到 `RBB:INVARIANTS`、Step 2/3、Hard constraints、Untrusted repository content。
+- **README 与版本记录**：补 0.3.11 / 0.3.12 记录，`plugin.toml`、`pyproject.toml` 与 README 同步到 0.3.12。
+- 规则不变块与 `CANONICAL_SHA256` 未动；退出码 0/1/2 语义不变。测试 171 passed（另有 33 个子测试），Ruff 全绿。
+
 ## 0.3.11 — 2026-11-15
 
 按《neko-reuse-before-build_增量复审_对照_172》修当前代码里的残留与新增问题：

@@ -731,23 +731,24 @@ def _gate_parts(line: str) -> tuple[bool, str]:
 
 def _quick_lane_result(lines: list[str]) -> dict[str, Any] | None:
     """快速档是独立契约：三个有序非空字段，允许 Build 时前置门禁行。"""
-    # 没命中是快速档的另一种合法形态：一行说明 + 检索串；不能按完整档四段模板判 FAIL。
-    if lines and QUICK_NO_HIT_RX.match(_plain_line(lines[0])):
-        if len(lines) > 3:
-            return None
-        has_searches = any(QUICK_SEARCH_RX.search(_plain_line(line)) for line in lines)
-        notes = ["lane: quick", "no hit — 0 候选也是结论，不得据此编造仓库"]
-        if not has_searches:
-            return {
-                "ok": False, "missing": ["quick:searches"], "notes": notes,
-                "verdict": "", "modifiability": "", "lane": "quick-no-match",
-            }
-        return {
-            "ok": True, "missing": [], "notes": notes,
-            "verdict": "", "modifiability": "", "lane": "quick-no-match",
-        }
     first_is_gate, first_reason = _gate_parts(lines[0]) if lines else (False, "")
-    quick = lines[1:] if first_is_gate else lines
+    # 没命中是快速档的另一种合法形态：一行说明 + 检索串；Build 回复允许前面带门禁行。
+    lead = lines[1:] if first_is_gate else lines
+    if lead and QUICK_NO_HIT_RX.match(_plain_line(lead[0])):
+        if len(lead) > 3:
+            return None
+        has_searches = any(QUICK_SEARCH_RX.search(_plain_line(line)) for line in lead)
+        notes = ["lane: quick", "no hit — 0 候选也是结论，不得据此编造仓库"]
+        missing: list[str] = []
+        if first_is_gate and not first_reason:
+            missing.append("gate_reason")
+        if not has_searches:
+            missing.append("quick:searches")
+        return {
+            "ok": not missing, "missing": missing, "notes": notes,
+            "verdict": "Build" if first_is_gate else "", "modifiability": "", "lane": "quick-no-match",
+        }
+    quick = lead
     if not quick or not re.match(r"^(?:Reused|复用)\s*[:：]", _plain_line(quick[0]), re.IGNORECASE):
         return None
     expected = (("Reused", "复用"), ("Change", "改动"), ("Risk", "风险"))

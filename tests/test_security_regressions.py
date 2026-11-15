@@ -101,7 +101,7 @@ class TestSingleVersions(unittest.TestCase):
             and any(isinstance(target, ast.Name) and target.id == "__version__" for target in node.targets)
             and isinstance(node.value, ast.Constant)
         ]
-        self.assertEqual(versions, ["1.2.7"])
+        self.assertEqual(versions, ["1.2.8"])
 
     def test_plugin_and_project_versions_match(self):
         with open(os.path.join(ROOT, "plugin.toml"), "rb") as fh:

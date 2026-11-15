@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """校验一份本地化副本是否保住了不可变项。
 
-四道闸：
+五道闸：
   1. 不变块（<!-- RBB:INVARIANTS --> 之间）——逐字版比哈希，翻译版比规则条数与逐条锚点；
   2. 规则完整性——块内编号必须正好 1..N（N≥rules_min），删条、改号都会露馅；
   3. 语义锚点（localization.contract.json 的 must_have）——中英任一写法均算命中；
-  4. 声明行——`localized: host=... | kept=... | changed=... | unsupported=...`。
+  4. 关键章节——正典比正文 SHA-256，本地化副本比最小长度与章节内锚点；
+  5. 声明行——`localized: host=... | kept=... | changed=... | unsupported=...`。
 
 `--canonical` 不是开关，是自证：只对契约里列出的包内参考件生效，对任何其它文件一律拒绝（rc 2），
 免得"本地化者"给自己开个后门跳过声明检查。
@@ -14,13 +15,14 @@
     python scripts/verify_localized.py <file>              # 校验本地化副本（验收就用这个，不加 flag）
     python scripts/verify_localized.py <file> --canonical   # 仅用于包内参考件，其它路径会被拒绝
     python scripts/verify_localized.py --print-hash SKILL.md # 打印不变块哈希，用于更新契约
+    python scripts/verify_localized.py --print-section-hash SKILL.md # 打印关键章节正文哈希
 
 退出码：0 = PASS，1 = FAIL（缺什么会列出来），2 = 用法错误（如对包外文件用 --canonical）。
 """
 
 from __future__ import annotations
 
-__version__ = "1.2.7"
+__version__ = "1.2.8"
 
 import argparse
 import hashlib
@@ -33,6 +35,19 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_CONTRACT = os.path.join(os.path.dirname(HERE), "localization.contract.json")
 # 随包英文正典的基线钉在代码里，不能只相信同目录、同样可被改写的契约。
 CANONICAL_SHA256 = "fa0f991fbfd236d860a2c401aff6f104f994e97d2b1fa100c23eee9d046fbc93"
+# 关键章节的正文哈希同样钉在代码里：只改契约删掉 critical_sections 不能放行。
+CANONICAL_SECTION_SHA256 = {
+    "step2": "031a0a7cbff5c5f3b500c46a12d35e83036ff4109b5c1d041abbdb30623613a4",
+    "step3": "6bba58cd17a327df6284844010f17ba8a72e59e588c8bf4e31e7499caace8d76",
+    "hard_constraints": "c5699bd8be27016e9fcab95b80f0702dca3b44ed49df00501895855c25e61761",
+    "untrusted": "c878e673c7ca0394c4d211114dfdb589df4238735d4806b5a08d28dacabc984f",
+}
+CANONICAL_SECTION_FLOORS = {
+    "step2": 500,
+    "step3": 500,
+    "hard_constraints": 350,
+    "untrusted": 180,
+}
 
 
 def read_text(path: str) -> str:
@@ -218,6 +233,28 @@ def check_critical_sections(text: str, items: list[dict], is_canonical: bool) ->
     return missing
 
 
+def check_contract_baseline(contract: dict) -> list[str]:
+    """契约里的章节项不能少于代码内置基线（删项、降长度、换哈希都会露馅）。"""
+    missing: list[str] = []
+    items = {str(item.get("id", "")): item for item in contract.get("critical_sections", [])}
+    for ident, pinned in CANONICAL_SECTION_SHA256.items():
+        item = items.get(ident)
+        if item is None:
+            missing.append(f"critical_sections:{ident}")
+            continue
+        if not item.get("headings"):
+            missing.append(f"critical_sections_headings:{ident}")
+        if str(item.get("sha256", "")).lower() != pinned:
+            missing.append(f"critical_sections_hash:{ident}")
+        try:
+            floor = int(item.get("min_chars", 0) or 0)
+        except (TypeError, ValueError):
+            floor = 0
+        if floor < CANONICAL_SECTION_FLOORS[ident]:
+            missing.append(f"critical_sections_floor:{ident}({floor}<{CANONICAL_SECTION_FLOORS[ident]})")
+    return missing
+
+
 def check_declaration(text: str, decl: dict) -> list[str]:
     """声明行必须是文件末尾那条；代码围栏里的示例行不算（SKILL.md 自己就有一段示例）。"""
     prefix = decl.get("prefix", "localized:")
@@ -250,10 +287,14 @@ def main() -> int:
                     help="契约文件路径；只允许包内 localization.contract.json")
     ap.add_argument("--canonical", action="store_true",
                     help="仅用于包内参考件；对其它路径会被拒绝（rc 2）")
-    ap.add_argument("--print-hash", action="store_true",
-                    help="只打印不变块哈希（用于更新契约），不做校验")
+    group = ap.add_mutually_exclusive_group()
+    group.add_argument("--print-hash", action="store_true",
+                       help="只打印不变块哈希（用于更新契约），不做校验")
+    group.add_argument("--print-section-hash", action="store_true",
+                       help="只打印关键章节正文哈希（用于更新契约），不做校验")
     ap.add_argument("--quiet", action="store_true", help="只输出结果行")
     args = ap.parse_args()
+    print_only = args.print_hash or args.print_section_hash
 
     # --contract 不能指向任意文件：换成一份空契约（rules_min=0、无锚点）就能跳过全部检查。
     if os.path.realpath(args.contract) != os.path.realpath(DEFAULT_CONTRACT):
@@ -270,28 +311,35 @@ def main() -> int:
         with open(args.contract, "r", encoding="utf-8") as fh:
             contract = json.load(fh)
     except FileNotFoundError:
-        if not args.print_hash:
+        if args.print_hash:
+            contract = {}  # --print-hash 用默认标记即可，首次生成契约时还没有它
+        else:
             print(f"FAIL  contract not found: {args.contract}")
             return 1
-        contract = {}  # --print-hash 用默认标记即可，首次生成契约时还没有它
     except json.JSONDecodeError as exc:
         print(f"FAIL  contract is not valid JSON: {exc}")
         return 1
 
     want_hash = str((contract.get("block") or {}).get("canonical_sha256") or "")
-    if not args.print_hash and not re.fullmatch(r"[0-9a-fA-F]{64}", want_hash):
+    if not print_only and not re.fullmatch(r"[0-9a-fA-F]{64}", want_hash):
         print("FAIL  contract 缺少合法的 block.canonical_sha256（64 位十六进制）")
         return 1
-    if not args.print_hash and want_hash.lower() != CANONICAL_SHA256:
+    if not print_only and want_hash.lower() != CANONICAL_SHA256:
         print("FAIL  contract 的正典哈希与代码内置基线不一致；拒绝使用被改写的基线。")
         return 1
     try:
         rules_floor = int(contract.get("rules_min", 0))
     except (TypeError, ValueError):
         rules_floor = 0
-    if not args.print_hash and (rules_floor < 1 or not contract.get("must_have")):
+    if not print_only and (rules_floor < 1 or not contract.get("must_have")):
         print("FAIL  contract 的 rules_min 必须 ≥ 1，且 must_have 不能为空")
         return 1
+    if not print_only:
+        baseline_missing = check_contract_baseline(contract)
+        if baseline_missing:
+            print("FAIL  contract 的关键章节基线被放宽：")
+            print("MISSING: " + ", ".join(baseline_missing))
+            return 1
 
     block_cfg = contract.get("block", {})
     begin = block_cfg.get("begin", "RBB:INVARIANTS:BEGIN")
@@ -300,6 +348,21 @@ def main() -> int:
     want_hash = block_cfg.get("canonical_sha256", "")
 
     inner = extract_block(text, begin, end)
+    if args.print_section_hash:
+        items = contract.get("critical_sections") or []
+        if not items:
+            print("FAIL  contract 没有 critical_sections，无法打印章节哈希", file=sys.stderr)
+            return 1
+        failed = False
+        for item in items:
+            ident = str(item.get("id", "?"))
+            body = extract_section(text, item.get("headings", []))
+            if body is None:
+                print(f"MISSING section:{ident}", file=sys.stderr)
+                failed = True
+                continue
+            print(f"{ident} {section_hash(body)}")
+        return 1 if failed else 0
     if args.print_hash:
         if inner is None:
             print("FAIL  no invariants block found", file=sys.stderr)

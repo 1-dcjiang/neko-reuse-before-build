@@ -238,6 +238,17 @@ class TestVerifier(unittest.TestCase):
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertEqual(p.stdout.strip(), want)
 
+    def test_print_section_hash_matches_contract(self):
+        with open(self.CONTRACT, encoding="utf-8") as fh:
+            sections = json.load(fh)["critical_sections"]
+        p = subprocess.run(
+            [sys.executable, "-X", "utf8", self.VERIFY, "--print-section-hash", self.SKILL],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
+        )
+        self.assertEqual(p.returncode, 0, p.stderr)
+        got = dict(line.split(" ", 1) for line in p.stdout.strip().splitlines())
+        self.assertEqual(got, {item["id"]: item["sha256"] for item in sections})
+
     def test_removing_the_gate_fails(self):
         def mutate(text):
             return "\n".join(line for line in text.splitlines()
