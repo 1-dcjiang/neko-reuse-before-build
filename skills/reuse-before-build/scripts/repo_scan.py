@@ -40,21 +40,6 @@ except Exception:
 
 __version__ = "1.2.8"
 
-GH_CREATIONFLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
-
-PERMISSIVE = {"mit", "apache-2.0", "bsd-3-clause", "bsd-2-clause", "isc", "mpl-2.0", "0bsd", "unlicense"}
-
-AUTH_HINT = (
-    "gh 无法确认可用（可能是未登录、无权限，也可能是网络/主机配置不通）。"
-    "先执行 `gh auth status` 查看，必要时 `gh auth login`；"
-    "完全没有 gh 时改用 references/discovery-playbook.md 的网页检索串。"
-)
-FAIL_HINT = (
-    "检索失败 ≠ 没有同类项目。检查 `gh auth status` 与网络后重跑，"
-    "或改用 references/discovery-playbook.md 的网页检索串手工复核；不要据此断言不存在。"
-)
-
-
 def _load_script(filename: str, module_name: str):
     """按脚本位置加载共用实现，兼容直接执行与 importlib 契约测试。"""
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), filename)
@@ -73,24 +58,18 @@ validate_keyword = _gh_helpers.validate_keyword
 parse_search_output = _gh_helpers.parse_search_output
 search_args = _gh_helpers.search_args
 normalize_search_row = _gh_helpers.normalize_search_row
+unique_keywords = _gh_helpers.unique_keywords
+GH_CREATIONFLAGS = _gh_helpers.GH_CREATIONFLAGS
+PERMISSIVE = _gh_helpers.PERMISSIVE
+AUTH_HINT = _gh_helpers.AUTH_HINT
+FAIL_HINT = _gh_helpers.FAIL_HINT
+default_since = _gh_helpers.default_since
+activity_points = _gh_helpers.activity_points
+license_flags = _gh_helpers.license_flags
+md_cell = _gh_helpers.md_cell
+render_table = _gh_helpers.render_table
 
 _HOST_RX = re.compile(r"^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::\d{1,5})?$")
-
-
-def default_since(today: dt.date | None = None) -> str:
-    """默认"最近一年"用 365 天回退，避免闰日 2/29 的 replace(year-1) 崩掉。"""
-    today = today or dt.date.today()
-    return (today - dt.timedelta(days=365)).isoformat()
-
-
-def md_cell(value: object) -> str:
-    """表格单元格转义：竖线会切断 Markdown 表格，换行会切断行。"""
-    if value is None:
-        return "-"
-    text = str(value)
-    if text == "":
-        return "-"
-    return text.replace("|", "\\|").replace("\r", " ").replace("\n", " ")
 
 
 def gh_json(args: list[str], timeout: float = 60, gh_binary: str = "gh",
@@ -152,30 +131,6 @@ def scan(keyword: str, stars: int, updated_since: str, limit: int,
     return rows, True
 
 
-def activity_points(pushed_at: object) -> int:
-    if not isinstance(pushed_at, str) or not pushed_at:
-        return 0
-    try:
-        pushed = dt.datetime.fromisoformat(pushed_at.replace("Z", "+00:00"))
-        days = (dt.datetime.now(dt.timezone.utc) - pushed).days
-    except (AttributeError, TypeError, ValueError, OverflowError):
-        return 0
-    if days <= 90:
-        return 2
-    if days <= 365:
-        return 1
-    return 0
-
-
-def license_flags(license_obj: dict | None) -> tuple[int, str]:
-    key = ((license_obj or {}).get("key") or "").lower()
-    if not key:
-        return 0, "无 LICENSE ⚠"
-    if key in PERMISSIVE:
-        return 2, (license_obj or {}).get("spdxId") or key
-    return 1, (license_obj or {}).get("spdxId") or key
-
-
 def auth_ok(host: str = "", gh_binary: str = "gh", timeout: float = 30) -> tuple[bool, str]:
     """先查登录态：未登录时搜索会失败，提前给出可执行的修复提示。
 
@@ -209,27 +164,6 @@ def auth_ok(host: str = "", gh_binary: str = "gh", timeout: float = 30) -> tuple
     return True, ""
 
 
-def render_table(rows: list[dict]) -> str:
-    header = "| 仓库 | ★ | 最近推送 | 语言 | 许可 | open issues | 命中关键词 | URL |"
-    sep = "|---|---|---|---|---|---|---|---|"
-    lines = [header, sep]
-    for row in rows:
-        pushed = (row.get("pushedAt") or "")[:10] or "-"
-        if row["_activity"] == 0:
-            pushed = f"{pushed} ⚠停滞"
-        lines.append(
-            "| {name} | {stars} | {pushed} | {lang} | {lic} | {issues} | {kw} | {url} |".format(
-                name=md_cell(row.get("full_name")),
-                stars=md_cell(row.get("stargazersCount") or 0),
-                pushed=md_cell(pushed),
-                lang=md_cell(row.get("language")),
-                lic=md_cell(row["_lic_label"]),
-                issues=md_cell(row.get("openIssuesCount")),
-                kw=md_cell(", ".join(row.get("matched_keyword") or [])),
-                url=md_cell(row.get("url")),
-            )
-        )
-    return "\n".join(lines)
 
 
 def _stars_arg(value: str) -> int:
@@ -330,8 +264,8 @@ def main() -> int:
     parser.add_argument("--md-out", default="", help="把 Markdown 表格写入该文件（相对 --out-dir）")
     parser.add_argument("--json-out", default="", help="把原始结果写入该 JSON 文件（相对 --out-dir）")
     args = parser.parse_args()
-    # 在数量限制、gh 检索与结果统计之前去重，保持首次出现顺序。
-    args.keywords = list(dict.fromkeys(args.keywords))
+    # 在数量限制、gh 检索与结果统计之前去重，保持首次出现顺序（大小写不敏感）。
+    args.keywords = unique_keywords(args.keywords)
 
     if len(args.keywords) > max(1, min(10, args.max_keywords)):
         print(f"[error] 关键词给了 {len(args.keywords)} 个，上限 {min(10, args.max_keywords)} 个。"

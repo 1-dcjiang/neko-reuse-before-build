@@ -22,7 +22,7 @@
 
 from __future__ import annotations
 
-__version__ = "1.2.10"
+__version__ = "1.2.11"
 
 import argparse
 import hashlib
@@ -200,6 +200,8 @@ def check_frontmatter(fm: dict | None) -> tuple[list[str], list[str]]:
 
 def _all_anchor_present(text: str, needle: str) -> bool:
     """all 锚点忽略大小写；ASCII 词按边界匹配，中文等多字节文本仍按子串匹配。"""
+    if not isinstance(needle, str) or not needle:
+        return False
     if not needle.isascii():
         return needle.lower() in text.lower()
     pattern = re.escape(needle)

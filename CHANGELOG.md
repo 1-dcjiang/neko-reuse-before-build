@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.16 — 2026-11-15
+
+按《A3-rbb-1f349eb-增量深审》收口可操作残留：
+
+- **校验器版本**：`verify_localized.py` 的 `all` 锚点语义与报错格式已变，补丁版本从 `1.2.10` 升到 `1.2.11`，不再让下游无法按版本判断行为差异。
+- **空锚点防御**：`_all_anchor_present` 对空字符串、非字符串直接返回 `False`，契约被改坏时不再抛 `IndexError` / `AttributeError`。
+- **关键词去重区分大小写**：`gh_helpers.unique_keywords` 按 `casefold()` 去重，`Kw` / `kw` 只检索一次，保留首次写法；`repo_scan` 与 `rbb_core` 共用。
+- **检索辅助继续收敛**：`default_since`、`activity_points`、`license_flags`、`md_cell`、`render_table`、`PERMISSIVE`、`AUTH_HINT` / `FAIL_HINT`、`GH_CREATIONFLAGS` 也移入 `gh_helpers.py`；0.3.15 的标题更正为「共用 5 个辅助函数」。
+- **版本与文档**：插件版本升至 `0.3.16`，README 当前引用与 `docs/vendor.md` 示例同步。
+- 仍保留的差异：`gh_json` / `auth_ok` / `scan` 因两侧路径校验与 host 参数不同，尚未合并；`any` 锚点继续按子串匹配（当前契约短词风险低）。
+- 测试 182 passed（另有 73 个子测试），unittest 137 tests，Ruff 全绿。
+
 ## 0.3.15 — 2026-11-15
 
 按《rbb-6900359-增量深审》修完全部可操作遗留项：
@@ -7,7 +19,7 @@
 - **盘符根目录脱敏**：`redaction.py` 对 `C:`、`C:\`、`C:/` 等形式跳过 home 替换，避免全文本过度脱敏；已有 POSIX 根目录与极短路径保护不变。
 - **CLI 检索前去重**：`repo_scan.py` 在关键词数量限制、gh 检索和统计之前按首次出现顺序去重；重复关键词只触发一次搜索。`rbb_core.py` 入口已有去重，本轮补真实 `gh_json` 调用层回归。
 - **`all` 锚点更严格且可诊断**：失败信息只列出实际缺失词；ASCII 锚点按不区分大小写的词边界匹配，`rebuild` / `joined` 不再冒充 `Build` / `Join`，中文锚点保持子串语义。
-- **检索辅助只剩一份实现**：新增随包 `gh_helpers.py`，插件内核与 CLI 共用 `which_path_only`、`validate_keyword`、`parse_search_output`、`search_args` 与 `normalize_search_row`；CLI、插件入口及 PATH 安全行为不变。
+- **检索辅助先共用 5 个函数**：新增随包 `gh_helpers.py`，插件内核与 CLI 共用 `which_path_only`、`validate_keyword`、`parse_search_output`、`search_args` 与 `normalize_search_row`；CLI、插件入口及 PATH 安全行为不变。
 - **脚本与工作流版本**：`repo_scan.py` 补丁版本升至 `1.2.8`，`verify_localized.py` 保持 `1.2.10`；离线测试工作流的 checkout / setup-python 固定到 vendor 工作流所用完整 SHA，官方 managed `verify.yml` / `release.yml` 的 `@main` 不变。
 - **版本与文档**：插件版本升至 `0.3.15`，同步 README 当前引用与 `docs/vendor.md` 全部示例；README 历史版本记录拆为列表。规则不变块、契约哈希与 prompt 登记均未修改。
 - 测试 180 passed（另有 49 个子测试），unittest 135 tests，Ruff 全绿。

@@ -82,7 +82,10 @@ class TestSharedGhHelpers(unittest.TestCase):
     def test_core_and_cli_expose_the_same_shared_helper_functions(self):
         for module in (rbb_core, repo_scan):
             for name in (
-                "which_path_only", "validate_keyword", "parse_search_output", "search_args", "normalize_search_row",
+                "which_path_only", "validate_keyword", "parse_search_output", "search_args",
+                "normalize_search_row", "unique_keywords", "default_since", "activity_points",
+                "license_flags", "md_cell", "render_table", "GH_CREATIONFLAGS", "PERMISSIVE",
+                "AUTH_HINT", "FAIL_HINT",
             ):
                 with self.subTest(module=module.__name__, helper=name):
                     self.assertIs(getattr(module, name), getattr(module._gh_helpers, name))
@@ -101,6 +104,10 @@ class TestSharedGhHelpers(unittest.TestCase):
                 argv = module.search_args("-clip", 0, "2026-01-01", 2)
                 self.assertEqual(argv[-2], "--")
                 self.assertTrue(argv[-1].startswith("-clip stars:>=0"))
+
+    def test_keyword_dedupe_is_case_insensitive(self):
+        self.assertEqual(repo_scan.unique_keywords(["Kw", "kw", "other"]), ["Kw", "other"])
+        self.assertEqual(rbb_core.normalize_keywords(("Kw", "kw", "other")), (["Kw", "other"], ""))
 
 
 class TestGhExecutableResolution(unittest.TestCase):
@@ -137,7 +144,7 @@ class TestSingleVersions(unittest.TestCase):
             and any(isinstance(target, ast.Name) and target.id == "__version__" for target in node.targets)
             and isinstance(node.value, ast.Constant)
         ]
-        self.assertEqual(versions, ["1.2.10"])
+        self.assertEqual(versions, ["1.2.11"])
 
     def test_repo_scan_patch_version_tracks_behavior_change(self):
         self.assertEqual(repo_scan.__version__, "1.2.8")

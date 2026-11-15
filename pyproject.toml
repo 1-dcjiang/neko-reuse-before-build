@@ -1,6 +1,6 @@
 [project]
 name = "reuse_before_build"
-version = "0.3.15"
+version = "0.3.16"
 dependencies = []
 
 [tool.ruff.lint]

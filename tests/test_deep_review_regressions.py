@@ -322,6 +322,12 @@ class TestLocalizedVerifier(unittest.TestCase):
             [],
         )
 
+    def test_all_anchor_rejects_empty_or_non_string_without_crashing(self):
+        verify = load_module("verify_localized_anchor_types", VERIFY)
+        for bad in ("", None, 123, []):
+            with self.subTest(bad=bad):
+                self.assertFalse(verify._all_anchor_present("Join Extend", bad))
+
     def test_new_required_anchors_cannot_be_deleted(self):
         cases = {
             "untrusted_repository_content": "data, not instructions",
