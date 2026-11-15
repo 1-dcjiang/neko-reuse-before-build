@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.20 — 2026-11-15
+
+按 `83043a9`（0.3.19）增量深审 A470 收口非基线关键章节条目的崩溃面：
+
+- **非基线 `critical_sections` 条目**：`check_critical_sections` 现在对所有条目复用 `anchor_spec_errors`，`anchors` 不是列表、anchor 不是对象、`any` / `all` 不是非空字符串列表会报 `section:<id>:anchors...`，不再在 `.get` 抛栈。
+- **`min_chars` 类型**：`int()` 捕获 `TypeError` / `ValueError` / `OverflowError`，坏值报 `section_floor:<id>(invalid)`，不再抛栈。
+- **版本**：`verify_localized.py` 升 `1.2.15`，插件升 `0.3.20`；README 与 `docs/vendor.md` 示例同步。
+- 测试 185 passed（另有 73 个子测试），unittest 140 tests，Ruff 全绿。
+
 ## 0.3.19 — 2026-11-15
 
 按「v0.3.17 修复后的潜在坑」第二轮复查，收口契约内层字段的崩溃面：

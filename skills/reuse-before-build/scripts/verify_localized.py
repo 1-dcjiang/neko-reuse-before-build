@@ -22,7 +22,7 @@
 
 from __future__ import annotations
 
-__version__ = "1.2.14"
+__version__ = "1.2.15"
 
 import argparse
 import hashlib
@@ -289,10 +289,19 @@ def check_critical_sections(text: str, items: list[dict], is_canonical: bool) ->
             if section_hash(body) != str(item["sha256"]).lower():
                 missing.append(f"section_hash:{ident}")
             continue
-        floor = int(item.get("min_chars", 0) or 0)
+        anchors = item.get("anchors", [])
+        anchor_errors = anchor_spec_errors(anchors, f"section:{ident}:anchors")
+        if anchor_errors:
+            missing.extend(anchor_errors)
+            continue
+        try:
+            floor = int(item.get("min_chars", 0) or 0)
+        except (TypeError, ValueError, OverflowError):
+            missing.append(f"section_floor:{ident}(invalid)")
+            continue
         if floor and len(body.strip()) < floor:
             missing.append(f"section_short:{ident}({len(body.strip())}<{floor})")
-        for anchor in item.get("anchors", []):
+        for anchor in anchors:
             aid = anchor.get("id", "?")
             any_of = anchor.get("any", [])
             all_of = anchor.get("all", [])

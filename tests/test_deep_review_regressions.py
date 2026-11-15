@@ -206,6 +206,30 @@ class TestDeliverableContract(unittest.TestCase):
             ),
             ["section:step2(bad_headings)"],
         )
+        self.assertEqual(
+            verify.check_critical_sections(
+                "## Evaluate\nactivity",
+                [{"id": "extra", "headings": ["Evaluate"], "min_chars": "abc", "anchors": []}],
+                False,
+            ),
+            ["section_floor:extra(invalid)"],
+        )
+        self.assertEqual(
+            verify.check_critical_sections(
+                "## Evaluate\nactivity",
+                [{"id": "extra", "headings": ["Evaluate"], "anchors": [1]}],
+                False,
+            ),
+            ["section:extra:anchors[0](not_object)"],
+        )
+        self.assertEqual(
+            verify.check_critical_sections(
+                "## Evaluate\nactivity",
+                [{"id": "extra", "headings": ["Evaluate"], "anchors": {}}],
+                False,
+            ),
+            ["section:extra:anchors(not_list)"],
+        )
 
     def test_build_without_candidate_table_does_not_invent_modifiability(self):
         text = FULL.replace(
