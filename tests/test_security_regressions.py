@@ -61,6 +61,13 @@ class TestSharedRedaction(unittest.TestCase):
         with mock.patch("os.path.expanduser", return_value="/"):
             self.assertEqual(rbb_core.redact_text("/api/v1/repo"), "/api/v1/repo")
 
+    def test_drive_root_home_does_not_redact_every_drive_reference(self):
+        for home in ("C:", "C:\\", "C:/", "c:\\\\"):
+            with self.subTest(home=home), mock.patch("os.path.expanduser", return_value=home):
+                text = f"build C:/one and C:\\two; home={home}"
+                self.assertEqual(rbb_core.redact_text(text), text)
+                self.assertEqual(repo_scan.redact_text(text), text)
+
     def test_only_the_shared_module_owns_redaction_regexes(self):
         for module in (rbb_core, repo_scan):
             for name in ("_SECRET_RX", "_URL_CRED_RX", "_HEADER_RX"):
@@ -69,6 +76,31 @@ class TestSharedRedaction(unittest.TestCase):
             os.path.realpath(rbb_core.REDACTION_SCRIPT),
             os.path.realpath(os.path.join(os.path.dirname(repo_scan.__file__), "redaction.py")),
         )
+
+
+class TestSharedGhHelpers(unittest.TestCase):
+    def test_core_and_cli_expose_the_same_shared_helper_functions(self):
+        for module in (rbb_core, repo_scan):
+            for name in (
+                "which_path_only", "validate_keyword", "parse_search_output", "search_args", "normalize_search_row",
+            ):
+                with self.subTest(module=module.__name__, helper=name):
+                    self.assertIs(getattr(module, name), getattr(module._gh_helpers, name))
+        self.assertEqual(
+            os.path.realpath(rbb_core.GH_HELPERS_SCRIPT),
+            os.path.realpath(os.path.join(os.path.dirname(repo_scan.__file__), "gh_helpers.py")),
+        )
+
+    def test_keyword_and_json_contracts_hold_at_both_entry_points(self):
+        for module in (rbb_core, repo_scan):
+            with self.subTest(module=module.__name__):
+                self.assertEqual(module.validate_keyword("  clip tool  "), "clip tool")
+                with self.assertRaisesRegex(ValueError, "检索限定符"):
+                    module.validate_keyword("clip stars:>10")
+                self.assertEqual(module.parse_search_output('[1, {"url": "u"}]'), [{"url": "u"}])
+                argv = module.search_args("-clip", 0, "2026-01-01", 2)
+                self.assertEqual(argv[-2], "--")
+                self.assertTrue(argv[-1].startswith("-clip stars:>=0"))
 
 
 class TestGhExecutableResolution(unittest.TestCase):
@@ -106,6 +138,9 @@ class TestSingleVersions(unittest.TestCase):
             and isinstance(node.value, ast.Constant)
         ]
         self.assertEqual(versions, ["1.2.10"])
+
+    def test_repo_scan_patch_version_tracks_behavior_change(self):
+        self.assertEqual(repo_scan.__version__, "1.2.8")
 
     def test_plugin_and_project_versions_match(self):
         with open(os.path.join(ROOT, "plugin.toml"), "rb") as fh:

@@ -296,6 +296,31 @@ class TestLocalizedVerifier(unittest.TestCase):
         proc = self.verify_text(ZH, mutate)
         self.assertEqual(proc.returncode, 1, proc.stdout)
         self.assertIn("section_anchor:step2:verdict_table", proc.stdout)
+        self.assertIn("needs all of: Fork", proc.stdout)
+
+    def test_all_anchors_use_word_boundaries_and_support_chinese(self):
+        verify = load_module("verify_localized_anchor_boundaries", VERIFY)
+        items = [{
+            "id": "step2",
+            "headings": ["Evaluate", "评估"],
+            "anchors": [{"id": "verdicts", "all": ["Join", "Extend", "Fork", "Build"]}],
+        }]
+        negative = verify.check_critical_sections("## Evaluate\nrebuild joined extended forked", items, False)
+        self.assertEqual(
+            negative,
+            ["section_anchor:step2:verdicts(needs all of: Join, Extend, Fork, Build)"],
+        )
+        positive = verify.check_critical_sections("## Evaluate\njoin; EXTEND; fork; build.", items, False)
+        self.assertEqual(positive, [])
+        chinese_items = [{
+            "id": "step2",
+            "headings": ["评估"],
+            "anchors": [{"id": "verdicts", "all": ["加入", "扩展", "分叉", "新建"]}],
+        }]
+        self.assertEqual(
+            verify.check_critical_sections("## 评估\n加入、扩展、分叉、新建。", chinese_items, False),
+            [],
+        )
 
     def test_new_required_anchors_cannot_be_deleted(self):
         cases = {
@@ -368,7 +393,7 @@ class TestProcessHardening(unittest.TestCase):
         for module in (core, repo_scan):
             with self.subTest(module=module.__name__):
                 with mock.patch.dict(os.environ, {"PATH": os.path.dirname(sys.executable)}):
-                    with mock.patch.object(module.shutil, "which", return_value=".\\gh.exe"):
+                    with mock.patch.object(module._gh_helpers.shutil, "which", return_value=".\\gh.exe"):
                         self.assertEqual(module.which_path_only("gh"), "")
 
     def test_core_retries_rate_limit_once_within_budget(self):
@@ -396,28 +421,41 @@ class TestProcessHardening(unittest.TestCase):
             with mock.patch.object(core, "which_path_only", return_value=""):
                 self.assertEqual(core.resolve_python(), "")
 
+    def test_core_deduplicates_keywords_before_gh_search(self):
+        with mock.patch.object(core, "resolve_gh_path", return_value="C:/Tools/gh.exe"), \
+                mock.patch.object(core, "auth_ok", return_value=(True, "")), \
+                mock.patch.object(core, "gh_json", return_value=[]) as search:
+            result = core.search_candidates(["kw", "kw"], timeout=10)
+        self.assertEqual(result["code"], 0, result)
+        self.assertEqual(result["keywords"], ["kw"])
+        search.assert_called_once()
+        self.assertTrue(search.call_args.args[1][-1].startswith("kw "))
+
     def test_cli_does_not_duplicate_repeated_keywords(self):
         row = {
             "url": "https://github.com/owner/demo",
-            "full_name": "owner/demo",
+            "name": "demo",
+            "owner": {"login": "owner"},
             "stargazersCount": 120,
             "pushedAt": "2026-10-01T00:00:00Z",
             "language": "Python",
             "license": {"key": "mit", "spdxId": "MIT"},
             "openIssuesCount": 3,
         }
-        with mock.patch.object(repo_scan.shutil, "which",
-                               return_value=os.path.join(os.path.dirname(sys.executable), "gh.exe")), \
+        with mock.patch.object(repo_scan, "which_path_only", return_value="C:/Tools/gh.exe"), \
                 mock.patch.object(repo_scan, "auth_ok", return_value=(True, "")), \
-                mock.patch.object(repo_scan, "scan", side_effect=lambda *a, **k: ([dict(row)], True)), \
-                mock.patch.object(sys, "argv", ["repo_scan.py", "kw", "kw"]), \
+                mock.patch.object(repo_scan, "gh_json", return_value=[dict(row)]) as search, \
+                mock.patch.object(sys, "argv", ["repo_scan.py", "kw", "kw", "--max-keywords", "1"]), \
                 contextlib.redirect_stdout(io.StringIO()) as out, \
-                contextlib.redirect_stderr(io.StringIO()):
+                contextlib.redirect_stderr(io.StringIO()) as err:
             code = repo_scan.main()
         self.assertEqual(code, 0)
         table = out.getvalue()
         self.assertIn("| kw |", table)
         self.assertNotIn("kw, kw", table)
+        search.assert_called_once()
+        self.assertTrue(search.call_args.args[0][-1].startswith("kw "))
+        self.assertIn("共 1 个去重候选（1 个关键词）", err.getvalue())
 
 
 if __name__ == "__main__":

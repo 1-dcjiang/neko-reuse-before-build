@@ -198,6 +198,18 @@ def check_frontmatter(fm: dict | None) -> tuple[list[str], list[str]]:
     return missing, notes
 
 
+def _all_anchor_present(text: str, needle: str) -> bool:
+    """all 锚点忽略大小写；ASCII 词按边界匹配，中文等多字节文本仍按子串匹配。"""
+    if not needle.isascii():
+        return needle.lower() in text.lower()
+    pattern = re.escape(needle)
+    if needle[0].isalnum() or needle[0] == "_":
+        pattern = rf"(?<![A-Za-z0-9_]){pattern}"
+    if needle[-1].isalnum() or needle[-1] == "_":
+        pattern = rf"{pattern}(?![A-Za-z0-9_])"
+    return re.search(pattern, text, re.IGNORECASE) is not None
+
+
 def check_anchors(scope: str, items: list[dict], where: str) -> list[str]:
     missing = []
     low = scope.lower()
@@ -210,8 +222,9 @@ def check_anchors(scope: str, items: list[dict], where: str) -> list[str]:
             continue
         if any_of and not any(s.lower() in low for s in any_of):
             missing.append(f"{where}:{ident}")
-        if all_of and not all(s.lower() in low for s in all_of):
-            missing.append(f"{where}:{ident}(needs all of: {', '.join(all_of)})")
+        absent = [s for s in all_of if not _all_anchor_present(scope, s)]
+        if absent:
+            missing.append(f"{where}:{ident}(needs all of: {', '.join(absent)})")
     return missing
 
 
@@ -265,8 +278,9 @@ def check_critical_sections(text: str, items: list[dict], is_canonical: bool) ->
             all_of = anchor.get("all", [])
             if any_of and not any(needle.lower() in body.lower() for needle in any_of):
                 missing.append(f"section_anchor:{ident}:{aid}")
-            if all_of and not all(needle.lower() in body.lower() for needle in all_of):
-                missing.append(f"section_anchor:{ident}:{aid}")
+            absent = [needle for needle in all_of if not _all_anchor_present(body, needle)]
+            if absent:
+                missing.append(f"section_anchor:{ident}:{aid}(needs all of: {', '.join(absent)})")
     return missing
 
 

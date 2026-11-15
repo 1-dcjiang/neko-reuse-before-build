@@ -27,7 +27,6 @@ import importlib.util
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 import time
@@ -39,7 +38,7 @@ except Exception:
     pass
 
 
-__version__ = "1.2.7"
+__version__ = "1.2.8"
 
 GH_CREATIONFLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
 
@@ -56,64 +55,26 @@ FAIL_HINT = (
 )
 
 
-def _load_redaction():
+def _load_script(filename: str, module_name: str):
     """按脚本位置加载共用实现，兼容直接执行与 importlib 契约测试。"""
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "redaction.py")
-    spec = importlib.util.spec_from_file_location("rbb_redaction", path)
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), filename)
+    spec = importlib.util.spec_from_file_location(module_name, path)
     if spec is None or spec.loader is None:
-        raise RuntimeError("随包脱敏模块不可用")
+        raise RuntimeError(f"随包共用模块不可用：{filename}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-redact_text = _load_redaction().redact_text
+redact_text = _load_script("redaction.py", "rbb_redaction").redact_text
+_gh_helpers = _load_script("gh_helpers.py", "rbb_gh_helpers_cli")
+which_path_only = _gh_helpers.which_path_only
+validate_keyword = _gh_helpers.validate_keyword
+parse_search_output = _gh_helpers.parse_search_output
+search_args = _gh_helpers.search_args
+normalize_search_row = _gh_helpers.normalize_search_row
 
-# 关键词里出现检索限定符会覆盖脚本自己的 stars/pushed/archived 过滤条件。
-_QUALIFIER_RX = re.compile(
-    r"(?i)(?:^|\s)(?:stars|archived|pushed|created|updated|is|topic|language|license|"
-    r"owner|repo|user|org|size|fork|mirror|template):"
-)
 _HOST_RX = re.compile(r"^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::\d{1,5})?$")
-
-
-def which_path_only(name: str) -> str:
-    """只从 PATH 解析可执行文件，并对 Windows 的隐式当前目录结果再做硬校验。"""
-    raw = os.environ.get("PATH", "")
-    cwd = os.path.normcase(os.path.realpath(os.curdir))
-    entries = [
-        part for part in raw.split(os.pathsep)
-        if part and os.path.normcase(os.path.realpath(os.path.abspath(part))) != cwd
-    ]
-    if not entries:
-        return ""
-    path = os.pathsep.join(entries)
-    # Windows 优先真正的 gh.exe，不让 gh.cmd/gh.bat 抢先进入 cmd 参数解释层。
-    names = ("gh.exe", name) if os.name == "nt" and name.lower() == "gh" else (name,)
-    for candidate in names:
-        found = shutil.which(candidate, path=path) or ""
-        if not found or not os.path.isabs(found):
-            continue
-        real = os.path.normcase(os.path.realpath(found))
-        if os.path.dirname(real) == cwd:
-            continue
-        return found
-    return ""
-
-
-def validate_keyword(value: str) -> str:
-    """关键词必须是纯文本：拒绝 NUL/控制字符、超长与能覆盖过滤条件的检索限定符。"""
-    text = (value or "").strip()
-    if not text:
-        raise ValueError("关键词不能为空")
-    if len(text) > 200:
-        raise ValueError("单个关键词不能超过 200 字符")
-    if any(ord(ch) < 32 or ord(ch) == 127 for ch in text):
-        raise ValueError("关键词里不能有 NUL 或其它控制字符")
-    if _QUALIFIER_RX.search(text):
-        raise ValueError("关键词里不能带 stars:/pushed:/archived:/user:/org: 等检索限定符；"
-                         "门槛请用 --stars / --updated-since")
-    return text
 
 
 def default_since(today: dt.date | None = None) -> str:
@@ -130,25 +91,6 @@ def md_cell(value: object) -> str:
     if text == "":
         return "-"
     return text.replace("|", "\\|").replace("\r", " ").replace("\n", " ")
-
-
-def parse_search_output(out: str) -> list[dict]:
-    """把 `gh search repos --json …` 的真实输出解析成行；供契约测试直接复用。
-
-    只保留 dict 行：gh 偶尔会输出标量或嵌套错误对象，后面的 `row.get` 不能因此崩。
-    """
-    text = (out or "").strip()
-    if not text:
-        return []
-    try:
-        parsed = json.loads(text)
-    except ValueError as exc:
-        raise RuntimeError(f"gh 输出不是 JSON（{exc}）：{redact_text(text, 200)}") from None
-    if isinstance(parsed, dict):
-        return [parsed]
-    if isinstance(parsed, list):
-        return [item for item in parsed if isinstance(item, dict)]
-    return []
 
 
 def gh_json(args: list[str], timeout: float = 60, gh_binary: str = "gh",
@@ -183,13 +125,6 @@ def gh_json(args: list[str], timeout: float = 60, gh_binary: str = "gh",
     return parse_search_output(proc.stdout)
 
 
-def search_args(keyword: str, stars: int, updated_since: str, limit: int) -> list[str]:
-    """所有选项放 `--` 之前，检索串放 `--` 之后，防止 `-` 开头的关键词被当成 gh 选项。"""
-    query = f"{keyword} stars:>={stars} pushed:>={updated_since}"
-    fields = "url,name,owner,stargazersCount,pushedAt,license,isArchived,language,openIssuesCount,description"
-    return ["search", "repos", "--archived=false", "--limit", str(limit), "--json", fields, "--", query]
-
-
 def scan(keyword: str, stars: int, updated_since: str, limit: int,
          gh_binary: str = "gh", host: str = "", timeout: float = 60) -> tuple[list[dict], bool]:
     """返回 (rows, ok)。ok=False 表示这个关键词的检索本身失败，不是"没搜到"。
@@ -213,9 +148,7 @@ def scan(keyword: str, stars: int, updated_since: str, limit: int,
             print(f"[warn] 关键词 {keyword!r} 检索失败：{exc}", file=sys.stderr)
             return [], False
     for row in rows:
-        owner = (row.get("owner") or {}).get("login", "")
-        row["full_name"] = f"{owner}/{row.get('name', '')}" if owner else row.get("name", "")
-        row["matched_keyword"] = keyword
+        normalize_search_row(row, keyword)
     return rows, True
 
 
@@ -397,6 +330,8 @@ def main() -> int:
     parser.add_argument("--md-out", default="", help="把 Markdown 表格写入该文件（相对 --out-dir）")
     parser.add_argument("--json-out", default="", help="把原始结果写入该 JSON 文件（相对 --out-dir）")
     args = parser.parse_args()
+    # 在数量限制、gh 检索与结果统计之前去重，保持首次出现顺序。
+    args.keywords = list(dict.fromkeys(args.keywords))
 
     if len(args.keywords) > max(1, min(10, args.max_keywords)):
         print(f"[error] 关键词给了 {len(args.keywords)} 个，上限 {min(10, args.max_keywords)} 个。"

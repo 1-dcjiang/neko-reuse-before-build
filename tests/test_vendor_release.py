@@ -48,6 +48,7 @@ class TestVendorArchive(unittest.TestCase):
                 "rbb_core.py",
                 "docs/vendor.md",
                 "skills/reuse-before-build/scripts/redaction.py",
+                "skills/reuse-before-build/scripts/gh_helpers.py",
                 "skills/reuse-before-build/scripts/repo_scan.py",
                 "VENDOR-SHA256SUMS.txt",
             ):
@@ -135,6 +136,11 @@ class TestVendorDocsAndWorkflow(unittest.TestCase):
         self.assertIn("ref: ${{ github.event.workflow_run.head_sha }}", text)
         for required in ("vendor_release.py build", "verify-archive", "SHA256SUMS.txt", "gh release upload"):
             self.assertIn(required, text)
+        offline = (ROOT / ".github" / "workflows" / "offline-tests.yml").read_text(encoding="utf-8")
+        self.assertIn("actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2", offline)
+        self.assertIn("actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0", offline)
+        verify = (ROOT / ".github" / "workflows" / "verify.yml").read_text(encoding="utf-8")
+        self.assertIn("Project-N-E-K-O/N.E.K.O/.github/workflows/plugin-market-verify.yml@main", verify)
 
     def test_vendor_guide_pins_neko_repository_version_and_target(self):
         text = (ROOT / "docs" / "vendor.md").read_text(encoding="utf-8")
