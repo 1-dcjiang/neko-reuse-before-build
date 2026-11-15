@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.17 — 2026-11-15
+
+按「剩余项」复查再收口两处会误导排查的行为：
+
+- **`any` 锚点统一词边界**：`any` 与 `all` 共用 `_anchor_present`；ASCII 词按词边界匹配，中文等多字节文本仍按子串匹配，避免给中文硬套 `\b` 导致译本全红。
+- **契约结构在加载时报错**：`check_contract_baseline` 校验 `rule_anchors` / `must_have` 的 `any` / `all` 必须是非空字符串列表；空串、`null`、非列表都在 CLI 入口直接报 contract 错，不再伪装成普通「缺锚点」。
+- **版本**：`verify_localized.py` 升 `1.2.12`，插件升 `0.3.17`；README 与 `docs/vendor.md` 示例同步。
+- 保持硬加载：`gh_helpers.py` / `redaction.py` 缺失仍在导入时失败，README 已写明必需文件；不做懒加载，避免把「插件起不来」变成更晚的「第一次检索才报错」。
+- 测试 183 passed（另有 73 个子测试），unittest 138 tests，Ruff 全绿。
+
 ## 0.3.16 — 2026-11-15
 
 按《A3-rbb-1f349eb-增量深审》收口可操作残留：
@@ -20,7 +30,7 @@
 - **CLI 检索前去重**：`repo_scan.py` 在关键词数量限制、gh 检索和统计之前按首次出现顺序去重；重复关键词只触发一次搜索。`rbb_core.py` 入口已有去重，本轮补真实 `gh_json` 调用层回归。
 - **`all` 锚点更严格且可诊断**：失败信息只列出实际缺失词；ASCII 锚点按不区分大小写的词边界匹配，`rebuild` / `joined` 不再冒充 `Build` / `Join`，中文锚点保持子串语义。
 - **检索辅助先共用 5 个函数**：新增随包 `gh_helpers.py`，插件内核与 CLI 共用 `which_path_only`、`validate_keyword`、`parse_search_output`、`search_args` 与 `normalize_search_row`；CLI、插件入口及 PATH 安全行为不变。
-- **脚本与工作流版本**：`repo_scan.py` 补丁版本升至 `1.2.8`，`verify_localized.py` 保持 `1.2.10`；离线测试工作流的 checkout / setup-python 固定到 vendor 工作流所用完整 SHA，官方 managed `verify.yml` / `release.yml` 的 `@main` 不变。
+- **脚本与工作流版本**：`repo_scan.py` 补丁版本升至 `1.2.8`，`verify_localized.py` 在 0.3.15 发布时保持 `1.2.10`；离线测试工作流的 checkout / setup-python 固定到 vendor 工作流所用完整 SHA，官方 managed `verify.yml` / `release.yml` 的 `@main` 不变。
 - **版本与文档**：插件版本升至 `0.3.15`，同步 README 当前引用与 `docs/vendor.md` 全部示例；README 历史版本记录拆为列表。规则不变块、契约哈希与 prompt 登记均未修改。
 - 测试 180 passed（另有 49 个子测试），unittest 135 tests，Ruff 全绿。
 

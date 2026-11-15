@@ -22,7 +22,7 @@
 
 from __future__ import annotations
 
-__version__ = "1.2.11"
+__version__ = "1.2.12"
 
 import argparse
 import hashlib
@@ -198,9 +198,9 @@ def check_frontmatter(fm: dict | None) -> tuple[list[str], list[str]]:
     return missing, notes
 
 
-def _all_anchor_present(text: str, needle: str) -> bool:
-    """all 锚点忽略大小写；ASCII 词按边界匹配，中文等多字节文本仍按子串匹配。"""
-    if not isinstance(needle, str) or not needle:
+def _anchor_present(text: str, needle: object) -> bool:
+    """锚点忽略大小写；ASCII 词按词边界匹配，中文等多字节文本仍按子串匹配。"""
+    if not isinstance(needle, str) or not needle.strip():
         return False
     if not needle.isascii():
         return needle.lower() in text.lower()
@@ -212,9 +212,13 @@ def _all_anchor_present(text: str, needle: str) -> bool:
     return re.search(pattern, text, re.IGNORECASE) is not None
 
 
+def _all_anchor_present(text: str, needle: object) -> bool:
+    """`all` 与 `any` 共用同一套锚点判定，避免一个按词边界、一个按子串。"""
+    return _anchor_present(text, needle)
+
+
 def check_anchors(scope: str, items: list[dict], where: str) -> list[str]:
     missing = []
-    low = scope.lower()
     for item in items:
         ident = item.get("id", "?")
         any_of = item.get("any", [])
@@ -222,9 +226,9 @@ def check_anchors(scope: str, items: list[dict], where: str) -> list[str]:
         if not any_of and not all_of:
             missing.append(f"{where}:{ident}(no any/all spec)")
             continue
-        if any_of and not any(s.lower() in low for s in any_of):
+        if any_of and not any(_anchor_present(scope, s) for s in any_of):
             missing.append(f"{where}:{ident}")
-        absent = [s for s in all_of if not _all_anchor_present(scope, s)]
+        absent = [s for s in all_of if not _anchor_present(scope, s)]
         if absent:
             missing.append(f"{where}:{ident}(needs all of: {', '.join(absent)})")
     return missing
@@ -311,10 +315,42 @@ def anchor_signature(value: object) -> tuple[tuple[str, tuple[str, ...], tuple[s
     return tuple(rows)
 
 
+def anchor_spec_errors(value: object, field: str) -> list[str]:
+    """契约里的 any/all 必须是「非空字符串列表」；坏契约要在加载时报 contract 错。"""
+    if not isinstance(value, list):
+        return [f"{field}(not_list)"]
+    errors: list[str] = []
+    for index, item in enumerate(value):
+        if not isinstance(item, dict):
+            errors.append(f"{field}[{index}](not_object)")
+            continue
+        ident = str(item.get("id", "") or f"#{index}")
+        for key in ("any", "all"):
+            if key not in item:
+                continue
+            needles = item.get(key)
+            if not isinstance(needles, list):
+                errors.append(f"{field}:{ident}({key}_not_list)")
+                continue
+            for needle in needles:
+                if not isinstance(needle, str) or not needle.strip():
+                    errors.append(f"{field}:{ident}({key}_empty_or_non_string)")
+    return errors
+
+
 def check_contract_baseline(contract: dict) -> list[str]:
     """契约里的章节项不能少于代码内置基线（删项、降长度、换哈希、删锚点都会露馅）。"""
     missing: list[str] = []
-    items = {str(item.get("id", "")): item for item in contract.get("critical_sections", [])}
+    critical = contract.get("critical_sections", [])
+    if not isinstance(critical, list):
+        missing.append("critical_sections(not_list)")
+        critical = []
+    for index, item in enumerate(critical):
+        if not isinstance(item, dict):
+            missing.append(f"critical_sections[{index}](not_object)")
+    missing += anchor_spec_errors(contract.get("rule_anchors"), "rule_anchors")
+    missing += anchor_spec_errors(contract.get("must_have"), "must_have")
+    items = {str(item.get("id", "")): item for item in critical if isinstance(item, dict)}
     for ident, pinned in CANONICAL_SECTION_SHA256.items():
         item = items.get(ident)
         if item is None:
@@ -439,7 +475,7 @@ def main() -> int:
     if not print_only:
         baseline_missing = check_contract_baseline(contract)
         if baseline_missing:
-            print("FAIL  contract 的关键章节基线被放宽：")
+            print("FAIL  contract 校验失败（基线被放宽或结构不合法）：")
             print("MISSING: " + ", ".join(baseline_missing))
             return 1
 

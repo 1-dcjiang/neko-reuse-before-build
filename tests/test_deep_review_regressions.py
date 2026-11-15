@@ -158,6 +158,18 @@ class TestDeliverableContract(unittest.TestCase):
         contract = json.loads(read(os.path.join(SKILL_DIR, "localization.contract.json")))
         contract["declaration"]["keys"] = ["host"]
         self.assertIn("declaration_keys", verify.check_contract_baseline(contract))
+        contract = json.loads(read(os.path.join(SKILL_DIR, "localization.contract.json")))
+        contract["must_have"][0]["any"] = [""]
+        self.assertIn(
+            "must_have:gate(any_empty_or_non_string)",
+            verify.check_contract_baseline(contract),
+        )
+        contract = json.loads(read(os.path.join(SKILL_DIR, "localization.contract.json")))
+        contract["rule_anchors"][0]["any"] = [None]
+        self.assertIn(
+            "rule_anchors:rule_1(any_empty_or_non_string)",
+            verify.check_contract_baseline(contract),
+        )
 
     def test_build_without_candidate_table_does_not_invent_modifiability(self):
         text = FULL.replace(
@@ -319,6 +331,21 @@ class TestLocalizedVerifier(unittest.TestCase):
         }]
         self.assertEqual(
             verify.check_critical_sections("## 评估\n加入、扩展、分叉、新建。", chinese_items, False),
+            [],
+        )
+
+    def test_any_anchors_use_word_boundaries_and_support_chinese(self):
+        verify = load_module("verify_localized_any_boundaries", VERIFY)
+        self.assertEqual(
+            verify.check_anchors("joined; extended", [{"id": "verdict", "any": ["Join"]}], "anchor"),
+            ["anchor:verdict"],
+        )
+        self.assertEqual(
+            verify.check_anchors("Join", [{"id": "verdict", "any": ["Join"]}], "anchor"),
+            [],
+        )
+        self.assertEqual(
+            verify.check_anchors("加入已有仓库", [{"id": "verdict", "any": ["加入"]}], "anchor"),
             [],
         )
 
