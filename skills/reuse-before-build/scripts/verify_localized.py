@@ -22,7 +22,7 @@
 
 from __future__ import annotations
 
-__version__ = "1.2.9"
+__version__ = "1.2.10"
 
 import argparse
 import hashlib
@@ -73,6 +73,15 @@ CANONICAL_SECTION_ANCHORS = {
         ("verdict", ("deliverable's verdict", "交付结论必须来自"), ()),
     ),
 }
+CANONICAL_RULES_MIN = 5
+CANONICAL_RULE_ANCHOR_IDS = frozenset({"rule_1", "rule_2", "rule_3", "rule_4", "rule_5"})
+CANONICAL_MUST_HAVE_IDS = frozenset({
+    "gate", "verdict_order", "deliverable", "contributing_rule", "public_write_gate",
+    "quick_lane", "untrusted_repository_content", "modifiability_green_only",
+    "no_fifth_verdict", "branch_first", "thin_adapter", "never_join_red",
+})
+CANONICAL_DECLARATION_KEYS = ("host", "kept", "changed", "unsupported")
+CANONICAL_DECLARATION_WITHIN_LAST = 8
 
 
 def read_text(path: str) -> str:
@@ -253,9 +262,19 @@ def check_critical_sections(text: str, items: list[dict], is_canonical: bool) ->
         for anchor in item.get("anchors", []):
             aid = anchor.get("id", "?")
             any_of = anchor.get("any", [])
+            all_of = anchor.get("all", [])
             if any_of and not any(needle.lower() in body.lower() for needle in any_of):
                 missing.append(f"section_anchor:{ident}:{aid}")
+            if all_of and not all(needle.lower() in body.lower() for needle in all_of):
+                missing.append(f"section_anchor:{ident}:{aid}")
     return missing
+
+
+def id_set(value: object) -> frozenset[str]:
+    """取契约锚点条目的 id 集合；形状不对按空集合处理。"""
+    if not isinstance(value, list):
+        return frozenset()
+    return frozenset(str(item.get("id", "")) for item in value if isinstance(item, dict))
 
 
 def anchor_signature(value: object) -> tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...]:
@@ -297,6 +316,28 @@ def check_contract_baseline(contract: dict) -> list[str]:
             missing.append(f"critical_sections_floor:{ident}({floor}<{CANONICAL_SECTION_FLOORS[ident]})")
         if anchor_signature(item.get("anchors")) != CANONICAL_SECTION_ANCHORS[ident]:
             missing.append(f"critical_sections_anchors:{ident}")
+    try:
+        rules_min = int(contract.get("rules_min", 0) or 0)
+    except (TypeError, ValueError):
+        rules_min = 0
+    if rules_min != CANONICAL_RULES_MIN:
+        missing.append(f"rules_min:{rules_min}!={CANONICAL_RULES_MIN}")
+    if id_set(contract.get("rule_anchors")) != CANONICAL_RULE_ANCHOR_IDS:
+        missing.append("rule_anchor_ids")
+    if id_set(contract.get("must_have")) != CANONICAL_MUST_HAVE_IDS:
+        missing.append("must_have_ids")
+    declaration = contract.get("declaration", {})
+    if not isinstance(declaration, dict):
+        missing.append("declaration")
+    else:
+        if tuple(declaration.get("keys", [])) != CANONICAL_DECLARATION_KEYS:
+            missing.append("declaration_keys")
+        try:
+            within = int(declaration.get("within_last", 0) or 0)
+        except (TypeError, ValueError):
+            within = 0
+        if within != CANONICAL_DECLARATION_WITHIN_LAST:
+            missing.append(f"declaration_within_last:{within}!={CANONICAL_DECLARATION_WITHIN_LAST}")
     return missing
 
 

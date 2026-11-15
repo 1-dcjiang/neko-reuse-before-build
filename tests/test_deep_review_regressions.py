@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import importlib.util
+import contextlib
+import io
 import json
 import os
 import re
@@ -147,6 +149,15 @@ class TestDeliverableContract(unittest.TestCase):
             "critical_sections_anchors:step2",
             verify.check_contract_baseline(contract),
         )
+        contract = json.loads(read(os.path.join(SKILL_DIR, "localization.contract.json")))
+        contract["rules_min"] = 1
+        self.assertIn("rules_min:1!=5", verify.check_contract_baseline(contract))
+        contract = json.loads(read(os.path.join(SKILL_DIR, "localization.contract.json")))
+        contract["must_have"].pop()
+        self.assertIn("must_have_ids", verify.check_contract_baseline(contract))
+        contract = json.loads(read(os.path.join(SKILL_DIR, "localization.contract.json")))
+        contract["declaration"]["keys"] = ["host"]
+        self.assertIn("declaration_keys", verify.check_contract_baseline(contract))
 
     def test_build_without_candidate_table_does_not_invent_modifiability(self):
         text = FULL.replace(
@@ -275,6 +286,17 @@ class TestLocalizedVerifier(unittest.TestCase):
         self.assertEqual(proc.returncode, 1, proc.stdout)
         self.assertIn("section:step2", proc.stdout)
 
+    def test_verdict_table_requires_all_four_verdict_words(self):
+        def mutate(text):
+            start = text.index("## 第 2 步：评估")
+            end = text.index("\n## 第 3 步：加入", start)
+            section = re.sub(r"(?i)fork", "ZX", text[start:end])
+            return text[:start] + section + text[end:]
+
+        proc = self.verify_text(ZH, mutate)
+        self.assertEqual(proc.returncode, 1, proc.stdout)
+        self.assertIn("section_anchor:step2:verdict_table", proc.stdout)
+
     def test_new_required_anchors_cannot_be_deleted(self):
         cases = {
             "untrusted_repository_content": "data, not instructions",
@@ -373,6 +395,29 @@ class TestProcessHardening(unittest.TestCase):
         with mock.patch.object(core.sys, "executable", ""):
             with mock.patch.object(core, "which_path_only", return_value=""):
                 self.assertEqual(core.resolve_python(), "")
+
+    def test_cli_does_not_duplicate_repeated_keywords(self):
+        row = {
+            "url": "https://github.com/owner/demo",
+            "full_name": "owner/demo",
+            "stargazersCount": 120,
+            "pushedAt": "2026-10-01T00:00:00Z",
+            "language": "Python",
+            "license": {"key": "mit", "spdxId": "MIT"},
+            "openIssuesCount": 3,
+        }
+        with mock.patch.object(repo_scan.shutil, "which",
+                               return_value=os.path.join(os.path.dirname(sys.executable), "gh.exe")), \
+                mock.patch.object(repo_scan, "auth_ok", return_value=(True, "")), \
+                mock.patch.object(repo_scan, "scan", side_effect=lambda *a, **k: ([dict(row)], True)), \
+                mock.patch.object(sys, "argv", ["repo_scan.py", "kw", "kw"]), \
+                contextlib.redirect_stdout(io.StringIO()) as out, \
+                contextlib.redirect_stderr(io.StringIO()):
+            code = repo_scan.main()
+        self.assertEqual(code, 0)
+        table = out.getvalue()
+        self.assertIn("| kw |", table)
+        self.assertNotIn("kw, kw", table)
 
 
 if __name__ == "__main__":

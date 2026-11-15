@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.14 — 2026-11-15
+
+按《rbb-fc4b500-深审-1114225859》修深审新挖出的契约与运行时不一致，并收口其余可修项：
+
+- **`all` 锚点运行时生效**：`check_critical_sections` 同时检查 `any` 与 `all`；删掉第 2 步任一判决词（如 `Fork`）会报 `section_anchor:step2:verdict_table`，新增负例测试。
+- **契约基线钉全**：`rules_min` 固定为 5，`rule_anchors` / `must_have` 的 id 集合、`declaration.keys` 与 `within_last` 全部钉进代码；只改契约放宽会报 `rules_min:*` / `must_have_ids` / `declaration_keys`。
+- **vendor 版本断言收窄**：测试改为抓取 `docs/vendor.md` 全部 `x.y.z`，断言都等于当前 `plugin_version`，不再只写死 `0.3.11`。
+- **检索去重分叉**：`repo_scan.py` 合并重复关键词时去重，与 `rbb_core.py` 对齐；新增 CLI 回归测试，表里不再出现 `k, k`。
+- **未知 section 显式报错**：`rbb_rules` 只接受 `rules/flow/full`，未知值返回 `Err`，不再静默回落。
+- **根目录 home 不再过度脱敏**：`redaction.py` 在 home 为 `/` 或极短路径时跳过替换，避免把所有 `/` 变成 `~`；新增回归测试。
+- **vendor 工作流固定 Action SHA**：`actions/checkout` 与 `actions/setup-python` 从 `@v4` / `@v5` 改为固定 commit SHA，避免可变 tag 替换。
+- **校验器版本**：`__version__` 升至 `1.2.10`，测试同步。
+- **版本同步**：`plugin.toml`、`pyproject.toml`、README 与 `docs/vendor.md` 当前版本升到 `0.3.14`；规则不变块与 `CANONICAL_SHA256` 未动；退出码 0/1/2 语义不变。
+- 测试 174 passed（另有 33 个子测试），Ruff 全绿。
+
 ## 0.3.13 — 2026-11-15
 
 按《rbb-4a14fbd-增量复核-1114224427》收口 `0.3.12` 的文档残留与契约硬化缺口：

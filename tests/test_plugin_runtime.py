@@ -109,6 +109,9 @@ class TestPluginRuntime(unittest.TestCase):
         self.assertTrue(flow.is_ok(), _err_text(flow))
         self.assertEqual(len(flow.value["steps"]), 4)
         self.assertIn("Modifiability gate", flow.value["steps"][1]["content"])
+        bad = asyncio.run(plugin.rbb_rules(section="nope"))
+        self.assertFalse(bad.is_ok())
+        self.assertIn("未知 section", _err_text(bad))
         self.assertFalse(hasattr(plugin, "_python"))
 
     def test_scan_respects_disabled_switch(self):

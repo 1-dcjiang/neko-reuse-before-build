@@ -32,7 +32,8 @@ def _home_variants(home: str) -> list[str]:
 
 
 def _redact_home(text: str, home: str) -> str:
-    if not home:
+    # 根目录或极短路径（如 "/"、"C:"）替换会命中所有分隔符，属于过度脱敏。
+    if not home or home in {"/", "\\"} or len(home.strip("/\\")) <= 1:
         return text
     flags = re.IGNORECASE if os.name == "nt" else 0
     pattern = re.compile(

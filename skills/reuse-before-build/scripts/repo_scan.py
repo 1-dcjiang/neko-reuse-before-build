@@ -457,8 +457,9 @@ def main() -> int:
                 continue
             if key in merged:
                 if isinstance(merged[key]["matched_keyword"], list):
-                    merged[key]["matched_keyword"].append(kw)
-                else:
+                    if kw not in merged[key]["matched_keyword"]:
+                        merged[key]["matched_keyword"].append(kw)
+                elif merged[key]["matched_keyword"] != kw:
                     merged[key]["matched_keyword"] = [merged[key]["matched_keyword"], kw]
                 continue
             row["matched_keyword"] = kw

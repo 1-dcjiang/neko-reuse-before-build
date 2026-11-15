@@ -57,6 +57,10 @@ class TestSharedRedaction(unittest.TestCase):
             self.assertIn("~", result)
             self.assertNotIn(windows_case, result)
 
+    def test_root_home_does_not_redact_path_separators(self):
+        with mock.patch("os.path.expanduser", return_value="/"):
+            self.assertEqual(rbb_core.redact_text("/api/v1/repo"), "/api/v1/repo")
+
     def test_only_the_shared_module_owns_redaction_regexes(self):
         for module in (rbb_core, repo_scan):
             for name in ("_SECRET_RX", "_URL_CRED_RX", "_HEADER_RX"):
@@ -101,7 +105,7 @@ class TestSingleVersions(unittest.TestCase):
             and any(isinstance(target, ast.Name) and target.id == "__version__" for target in node.targets)
             and isinstance(node.value, ast.Constant)
         ]
-        self.assertEqual(versions, ["1.2.9"])
+        self.assertEqual(versions, ["1.2.10"])
 
     def test_plugin_and_project_versions_match(self):
         with open(os.path.join(ROOT, "plugin.toml"), "rb") as fh:

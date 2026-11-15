@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import re
 import tempfile
 import unittest
 import zipfile
@@ -143,7 +144,8 @@ class TestVendorDocsAndWorkflow(unittest.TestCase):
         self.assertIn("SHA256SUMS.txt", text)
         self.assertIn("VENDOR-SHA256SUMS.txt", text)
         self.assertIn("不等于签名", text)
-        self.assertNotIn("0.3.11", text)
+        versions = set(re.findall(r"(?<!\d)\d+\.\d+\.\d+(?!\d)", text))
+        self.assertEqual(versions, {vendor_release.plugin_version(ROOT)})
 
 
 if __name__ == "__main__":

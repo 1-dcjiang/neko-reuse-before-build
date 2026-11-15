@@ -194,6 +194,8 @@ class ReuseBeforeBuildPlugin(NekoPluginBase):
     async def rbb_rules(self, section: str = "", **_):
         params = self._params(_)
         section = (section or params.get("section") or "rules").strip().lower()
+        if section not in {"rules", "flow", "full"}:
+            return Err(SdkError(f"未知 section：{section!r}；只支持 rules / flow / full。"))
         try:
             text = await asyncio.to_thread(rbb_core.skill_text, "SKILL.md")
         except Exception as e:
