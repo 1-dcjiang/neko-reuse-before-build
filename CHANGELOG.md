@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.19 — 2026-11-15
+
+按「v0.3.17 修复后的潜在坑」第二轮复查，收口契约内层字段的崩溃面：
+
+- **关键章节 `headings` 形状**：`extract_section` 只接受字符串列表，`check_critical_sections` 对非列表 / 非对象 / 坏 `headings` 返回 `critical_sections(...)` 或 `section:<id>(bad_headings)`，不再在 `.strip()` 抛栈；契约基线在加载时同步报 `critical_sections_headings:<id>(invalid)`。
+- **`block` 内层字段**：`contract_root_errors` 校验 `begin` / `end` / `lang_marker_prefix` / `canonical_file` / `canonical_sha256` 必须是字符串，`canonical_files` 必须是字符串列表；`block.begin: 1` 这类手工改坏现在报 `MISSING: block.begin(not_string)`，不再在 `re.escape` 抛栈。
+- **`declaration` 形状**：`declaration` 必须是对象，`keys` 必须是字符串列表，`prefix` 必须是字符串；坏结构在入口直接报 contract 错。
+- **`--print-section-hash` 防御**：坏 `critical_sections` / 坏 `headings` 现在打印 `MISSING ...` 并返回 1，不再抛 `AttributeError`。
+- **版本**：`verify_localized.py` 升 `1.2.14`，插件升 `0.3.19`；README 与 `docs/vendor.md` 示例同步。
+- 测试 185 passed（另有 73 个子测试），unittest 140 tests，Ruff 全绿。
+
 ## 0.3.18 — 2026-11-15
 
 按《rbb-d261aa5-增量深审-A467》收口增量审核残留：
@@ -16,7 +27,7 @@
 
 按「剩余项」复查再收口两处会误导排查的行为：
 
-- **`any` 锚点统一词边界**：`any` 与 `all` 共用 `_anchor_present`；ASCII 词按词边界匹配，中文等多字节文本仍按子串匹配，避免给中文硬套 `\b` 导致译本全红。
+- **`check_anchors` 的 `any` 统一词边界**：`check_anchors` 的 `any` 与 `all` 共用 `_anchor_present`；ASCII 词按词边界匹配，中文等多字节文本仍按子串匹配，避免给中文硬套 `\b` 导致译本全红。关键章节的 `any` 在 0.3.18 单独补齐。
 - **契约结构在加载时报错**：`check_contract_baseline` 校验 `rule_anchors` / `must_have` 的 `any` / `all` 必须是非空字符串列表；空串、`null`、非列表都在 CLI 入口直接报 contract 错，不再伪装成普通「缺锚点」。
 - **版本**：`verify_localized.py` 升 `1.2.12`，插件升 `0.3.17`；README 与 `docs/vendor.md` 示例同步。
 - 保持硬加载：`gh_helpers.py` / `redaction.py` 缺失仍在导入时失败，README 已写明必需文件；不做懒加载，避免把「插件起不来」变成更晚的「第一次检索才报错」。

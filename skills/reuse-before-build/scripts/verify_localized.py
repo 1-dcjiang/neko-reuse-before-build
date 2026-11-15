@@ -22,7 +22,7 @@
 
 from __future__ import annotations
 
-__version__ = "1.2.13"
+__version__ = "1.2.14"
 
 import argparse
 import hashlib
@@ -236,9 +236,17 @@ def section_hash(body: str) -> str:
 
 def extract_section(text: str, headings: list[str]) -> str | None:
     """按二级标题取章节正文；代码围栏里的示例标题不算。"""
+    if not isinstance(headings, list):
+        return None
+    wanted = {
+        heading.strip().casefold()
+        for heading in headings
+        if isinstance(heading, str) and heading.strip()
+    }
+    if not wanted:
+        return None
     lines = text.splitlines()
     fenced = _fence_mask(lines)
-    wanted = {heading.strip().casefold() for heading in headings}
     starts: list[int] = []
     for index, line in enumerate(lines):
         if fenced[index]:
@@ -260,9 +268,20 @@ def extract_section(text: str, headings: list[str]) -> str | None:
 def check_critical_sections(text: str, items: list[dict], is_canonical: bool) -> list[str]:
     """关键章节不能只剩一个子串：正典比正文哈希，本地化副本比最小长度 + 多条锚点。"""
     missing: list[str] = []
+    if not isinstance(items, list):
+        return ["critical_sections(not_list)"]
     for item in items:
+        if not isinstance(item, dict):
+            missing.append("critical_sections(not_object)")
+            continue
         ident = item.get("id", "?")
-        body = extract_section(text, item.get("headings", []))
+        headings = item.get("headings", [])
+        if not isinstance(headings, list) or not any(
+            isinstance(heading, str) and heading.strip() for heading in headings
+        ):
+            missing.append(f"section:{ident}(bad_headings)")
+            continue
+        body = extract_section(text, headings)
         if body is None:
             missing.append(f"section:{ident}")
             continue
@@ -334,11 +353,30 @@ def anchor_spec_errors(value: object, field: str) -> list[str]:
 
 
 def contract_root_errors(contract: object) -> list[str]:
-    """契约顶层必须是对象，block 也必须是对象；否则后续 .get 会直接抛栈。"""
+    """契约顶层、block 与 declaration 的基本形状；坏字段会让后续代码直接抛栈。"""
     if not isinstance(contract, dict):
         return ["contract(not_object)"]
-    if "block" in contract and not isinstance(contract["block"], dict):
+    block = contract.get("block")
+    if "block" in contract and not isinstance(block, dict):
         return ["block(not_object)"]
+    if isinstance(block, dict):
+        for key in ("begin", "end", "lang_marker_prefix", "canonical_file", "canonical_sha256"):
+            if key in block and not isinstance(block[key], str):
+                return [f"block.{key}(not_string)"]
+        if "canonical_files" in block:
+            files = block["canonical_files"]
+            if not isinstance(files, list) or not all(isinstance(item, str) for item in files):
+                return ["block.canonical_files(not_string_list)"]
+    declaration = contract.get("declaration")
+    if "declaration" in contract and not isinstance(declaration, dict):
+        return ["declaration(not_object)"]
+    if isinstance(declaration, dict):
+        if "keys" in declaration:
+            keys = declaration["keys"]
+            if not isinstance(keys, list) or not all(isinstance(item, str) for item in keys):
+                return ["declaration.keys(not_string_list)"]
+        if "prefix" in declaration and not isinstance(declaration["prefix"], str):
+            return ["declaration.prefix(not_string)"]
     return []
 
 
@@ -360,8 +398,10 @@ def check_contract_baseline(contract: dict) -> list[str]:
         if item is None:
             missing.append(f"critical_sections:{ident}")
             continue
-        if not item.get("headings"):
-            missing.append(f"critical_sections_headings:{ident}")
+        if not isinstance(item.get("headings"), list) or not item.get("headings") or not all(
+            isinstance(heading, str) and heading.strip() for heading in item.get("headings")
+        ):
+            missing.append(f"critical_sections_headings:{ident}(invalid)")
         if str(item.get("sha256", "")).lower() != pinned:
             missing.append(f"critical_sections_hash:{ident}")
         try:
@@ -498,13 +538,24 @@ def main() -> int:
     inner = extract_block(text, begin, end)
     if args.print_section_hash:
         items = contract.get("critical_sections") or []
-        if not items:
-            print("FAIL  contract 没有 critical_sections，无法打印章节哈希", file=sys.stderr)
+        if not isinstance(items, list) or not items:
+            print("FAIL  contract 的 critical_sections 必须是非空数组", file=sys.stderr)
             return 1
         failed = False
         for item in items:
+            if not isinstance(item, dict):
+                print("MISSING critical_sections(not_object)", file=sys.stderr)
+                failed = True
+                continue
             ident = str(item.get("id", "?"))
-            body = extract_section(text, item.get("headings", []))
+            headings = item.get("headings")
+            if not isinstance(headings, list) or not any(
+                isinstance(heading, str) and heading.strip() for heading in headings
+            ):
+                print(f"MISSING section:{ident}(bad_headings)", file=sys.stderr)
+                failed = True
+                continue
+            body = extract_section(text, headings)
             if body is None:
                 print(f"MISSING section:{ident}", file=sys.stderr)
                 failed = True

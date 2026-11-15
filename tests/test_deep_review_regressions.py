@@ -170,12 +170,42 @@ class TestDeliverableContract(unittest.TestCase):
             "rule_anchors:rule_1(any_empty_or_non_string)",
             verify.check_contract_baseline(contract),
         )
+        contract = json.loads(read(os.path.join(SKILL_DIR, "localization.contract.json")))
+        contract["critical_sections"][0]["headings"] = [1]
+        self.assertIn(
+            "critical_sections_headings:step2(invalid)",
+            verify.check_contract_baseline(contract),
+        )
 
     def test_contract_root_and_block_must_be_objects(self):
         verify = load_module("verify_localized_contract_root", VERIFY)
         self.assertEqual(verify.contract_root_errors([]), ["contract(not_object)"])
         self.assertEqual(verify.contract_root_errors({"block": []}), ["block(not_object)"])
         self.assertEqual(verify.contract_root_errors({"block": {}}), [])
+        self.assertEqual(
+            verify.contract_root_errors({"block": {"begin": 1}}),
+            ["block.begin(not_string)"],
+        )
+        self.assertEqual(
+            verify.contract_root_errors({"block": {"canonical_files": [1]}}),
+            ["block.canonical_files(not_string_list)"],
+        )
+        self.assertEqual(verify.contract_root_errors({"declaration": []}), ["declaration(not_object)"])
+
+    def test_bad_critical_section_shape_does_not_crash(self):
+        verify = load_module("verify_localized_section_shape", VERIFY)
+        self.assertEqual(
+            verify.check_critical_sections("## Evaluate\nactivity", ["bad"], False),
+            ["critical_sections(not_object)"],
+        )
+        self.assertEqual(
+            verify.check_critical_sections(
+                "## Evaluate\nactivity",
+                [{"id": "step2", "headings": [1], "anchors": []}],
+                False,
+            ),
+            ["section:step2(bad_headings)"],
+        )
 
     def test_build_without_candidate_table_does_not_invent_modifiability(self):
         text = FULL.replace(
