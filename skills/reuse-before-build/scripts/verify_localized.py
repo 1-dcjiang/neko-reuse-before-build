@@ -22,7 +22,7 @@
 
 from __future__ import annotations
 
-__version__ = "1.2.12"
+__version__ = "1.2.13"
 
 import argparse
 import hashlib
@@ -212,11 +212,6 @@ def _anchor_present(text: str, needle: object) -> bool:
     return re.search(pattern, text, re.IGNORECASE) is not None
 
 
-def _all_anchor_present(text: str, needle: object) -> bool:
-    """`all` 与 `any` 共用同一套锚点判定，避免一个按词边界、一个按子串。"""
-    return _anchor_present(text, needle)
-
-
 def check_anchors(scope: str, items: list[dict], where: str) -> list[str]:
     missing = []
     for item in items:
@@ -282,9 +277,9 @@ def check_critical_sections(text: str, items: list[dict], is_canonical: bool) ->
             aid = anchor.get("id", "?")
             any_of = anchor.get("any", [])
             all_of = anchor.get("all", [])
-            if any_of and not any(needle.lower() in body.lower() for needle in any_of):
+            if any_of and not any(_anchor_present(body, needle) for needle in any_of):
                 missing.append(f"section_anchor:{ident}:{aid}")
-            absent = [needle for needle in all_of if not _all_anchor_present(body, needle)]
+            absent = [needle for needle in all_of if not _anchor_present(body, needle)]
             if absent:
                 missing.append(f"section_anchor:{ident}:{aid}(needs all of: {', '.join(absent)})")
     return missing
@@ -336,6 +331,15 @@ def anchor_spec_errors(value: object, field: str) -> list[str]:
                 if not isinstance(needle, str) or not needle.strip():
                     errors.append(f"{field}:{ident}({key}_empty_or_non_string)")
     return errors
+
+
+def contract_root_errors(contract: object) -> list[str]:
+    """契约顶层必须是对象，block 也必须是对象；否则后续 .get 会直接抛栈。"""
+    if not isinstance(contract, dict):
+        return ["contract(not_object)"]
+    if "block" in contract and not isinstance(contract["block"], dict):
+        return ["block(not_object)"]
+    return []
 
 
 def check_contract_baseline(contract: dict) -> list[str]:
@@ -456,6 +460,12 @@ def main() -> int:
             return 1
     except json.JSONDecodeError as exc:
         print(f"FAIL  contract is not valid JSON: {exc}")
+        return 1
+
+    root_errors = contract_root_errors(contract)
+    if root_errors:
+        print("FAIL  contract 顶层结构不合法：")
+        print("MISSING: " + ", ".join(root_errors))
         return 1
 
     want_hash = str((contract.get("block") or {}).get("canonical_sha256") or "")

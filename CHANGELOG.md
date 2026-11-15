@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.18 — 2026-11-15
+
+按《rbb-d261aa5-增量深审-A467》收口增量审核残留：
+
+- **关键章节 `any` 补词边界**：`check_critical_sections` 的 `any` / `all` 都改用 `_anchor_present`，`activity` 不再命中正文里的 `inactivity`；删除只剩测试在用的 `_all_anchor_present` 别名，并补章节 `any` 回归测试。
+- **`repo_scan.py` 行为变更补版本**：0.3.16 起 CLI 关键词去重已改大小写不敏感，补丁版本从 `1.2.8` 升到 `1.2.9`，测试同步。
+- **契约顶层结构防御**：契约 JSON 顶层不是对象、或 `block` 不是对象时，CLI 直接报 `MISSING: contract(not_object)` / `block(not_object)`，不再在 `contract.get(...)` 处抛栈。
+- **vendor 手册同步**：`docs/vendor.md` 写明 `any` / `all` 同规则（含关键章节）、ASCII 词边界、中文子串，以及坏契约在加载时报 contract 错。
+- **版本**：`verify_localized.py` 升 `1.2.13`，插件升 `0.3.18`；README 与 `docs/vendor.md` 示例同步。
+- 保留的已知取舍：`gh_json` / `auth_ok` / `scan` 仍按两侧路径校验与 host 参数分开实现；版本断言仍为硬编码常量，只防回退。
+- 测试 184 passed（另有 73 个子测试），unittest 139 tests，Ruff 全绿。
+
 ## 0.3.17 — 2026-11-15
 
 按「剩余项」复查再收口两处会误导排查的行为：

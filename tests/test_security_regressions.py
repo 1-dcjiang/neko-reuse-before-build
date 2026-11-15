@@ -144,10 +144,10 @@ class TestSingleVersions(unittest.TestCase):
             and any(isinstance(target, ast.Name) and target.id == "__version__" for target in node.targets)
             and isinstance(node.value, ast.Constant)
         ]
-        self.assertEqual(versions, ["1.2.12"])
+        self.assertEqual(versions, ["1.2.13"])
 
     def test_repo_scan_patch_version_tracks_behavior_change(self):
-        self.assertEqual(repo_scan.__version__, "1.2.8")
+        self.assertEqual(repo_scan.__version__, "1.2.9")
 
     def test_plugin_and_project_versions_match(self):
         with open(os.path.join(ROOT, "plugin.toml"), "rb") as fh:

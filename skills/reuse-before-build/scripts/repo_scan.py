@@ -38,7 +38,7 @@ except Exception:
     pass
 
 
-__version__ = "1.2.8"
+__version__ = "1.2.9"
 
 def _load_script(filename: str, module_name: str):
     """按脚本位置加载共用实现，兼容直接执行与 importlib 契约测试。"""

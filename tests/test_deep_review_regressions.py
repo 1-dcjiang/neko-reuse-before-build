@@ -171,6 +171,12 @@ class TestDeliverableContract(unittest.TestCase):
             verify.check_contract_baseline(contract),
         )
 
+    def test_contract_root_and_block_must_be_objects(self):
+        verify = load_module("verify_localized_contract_root", VERIFY)
+        self.assertEqual(verify.contract_root_errors([]), ["contract(not_object)"])
+        self.assertEqual(verify.contract_root_errors({"block": []}), ["block(not_object)"])
+        self.assertEqual(verify.contract_root_errors({"block": {}}), [])
+
     def test_build_without_candidate_table_does_not_invent_modifiability(self):
         text = FULL.replace(
             "| Repo | Date |\n|---|---|\n| owner/demo | 2026-10-01 |",
@@ -333,6 +339,19 @@ class TestLocalizedVerifier(unittest.TestCase):
             verify.check_critical_sections("## 评估\n加入、扩展、分叉、新建。", chinese_items, False),
             [],
         )
+        any_items = [{
+            "id": "step2",
+            "headings": ["Evaluate"],
+            "anchors": [{"id": "activity", "any": ["activity"]}],
+        }]
+        self.assertEqual(
+            verify.check_critical_sections("## Evaluate\ninactivity", any_items, False),
+            ["section_anchor:step2:activity"],
+        )
+        self.assertEqual(
+            verify.check_critical_sections("## Evaluate\nactivity", any_items, False),
+            [],
+        )
 
     def test_any_anchors_use_word_boundaries_and_support_chinese(self):
         verify = load_module("verify_localized_any_boundaries", VERIFY)
@@ -353,7 +372,7 @@ class TestLocalizedVerifier(unittest.TestCase):
         verify = load_module("verify_localized_anchor_types", VERIFY)
         for bad in ("", None, 123, []):
             with self.subTest(bad=bad):
-                self.assertFalse(verify._all_anchor_present("Join Extend", bad))
+                self.assertFalse(verify._anchor_present("Join Extend", bad))
 
     def test_new_required_anchors_cannot_be_deleted(self):
         cases = {
