@@ -78,19 +78,19 @@ docs/vendor.md                     下游 vendor 的固定版本接入与校验�
 - `config.example.toml` 承接运行配置模板（不含 `[plugin]`），`[settings]` 默认值不重复抄写，消掉「legacy runtime configuration」警告；
 - `tests/test_smoke.py`、`.vscode/settings.json`、`.vscode/tasks.json`、`pyproject.toml`、`.gitignore` 齐备；
 - `.github/workflows/{verify,release}.yml` 复用官方 `plugin-market-{verify,release}.yml@main`；
-- 发版 tag 必须与 `[plugin].version` 相同（当前 `0.3.10` → tag `v0.3.10`）。
+- 发版 tag 必须与 `[plugin].version` 相同（当前 `0.3.11` → tag `v0.3.11`）。
 
 ## 验过什么
 
-本版（v0.3.10）：
+本版（v0.3.11）：
 
-- **本地**：`python -m pytest -q tests skills/reuse-before-build/tests` **160 passed**（另有 20 个子测试）；`python -m ruff check .` 全绿；vendor 重复构建字节一致，解压后可脱离源仓库运行。
+- **本地**：`python -m pytest -q tests skills/reuse-before-build/tests` **166 passed**（另有 21 个子测试）；`python -m ruff check .` 全绿；vendor 重复构建字节一致，解压后可脱离源仓库运行。
 - **随包 skill**：`verify_localized.py` 对 `SKILL.md` 输出 `PASS verbatim`，`zh-guide.md` 输出 `translated(zh)`；核心不变块哈希 `fa0f991f…bc93` 未变。
 - **CI**：官方检查、payload 哈希与发布证明见本版 Release 的 `market-evidence.json` 和检查文本。
 
 ## 发布与市场
 
-- 流程：打 tag → 官方 Release 产出 `reuse_before_build.neko-plugin`、检查文本与 `market-evidence.json` → 独立 `workflow_run` vendor 工作流上传 `neko-reuse-before-build-v0.3.10-vendor.zip`、`vendor_release.py` 和统一 `SHA256SUMS.txt`；官方 managed `release.yml` 保持原样。
+- 流程：打 tag → 官方 Release 产出 `reuse_before_build.neko-plugin`、检查文本与 `market-evidence.json` → 独立 `workflow_run` vendor 工作流上传 `neko-reuse-before-build-v0.3.11-vendor.zip`、`vendor_release.py` 和统一 `SHA256SUMS.txt`；官方 managed `release.yml` 保持原样。
 - 下游把源码纳入自己仓库时，按 [vendor 接入文档](docs/vendor.md) 固定 tag、校验 ZIP、复制到 `plugin/plugins/reuse_before_build` 并做复制后复检；不要与 `.neko-plugin` 重复安装。
 - 插件包发布到市场：`neko-plugin publish market <release-url>`。
 - 市场展示信息（简介、展示页 README）由市场侧独立维护，发版不会覆盖；发布后在开发者中心「编辑展示信息 / 编辑展示页面」同步。

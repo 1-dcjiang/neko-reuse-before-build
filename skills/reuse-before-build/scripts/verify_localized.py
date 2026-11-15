@@ -166,6 +166,58 @@ def check_anchors(scope: str, items: list[dict], where: str) -> list[str]:
     return missing
 
 
+def section_hash(body: str) -> str:
+    norm = "\n".join(line.rstrip() for line in body.strip().splitlines())
+    return hashlib.sha256(norm.encode("utf-8")).hexdigest()
+
+
+def extract_section(text: str, headings: list[str]) -> str | None:
+    """按二级标题取章节正文；代码围栏里的示例标题不算。"""
+    lines = text.splitlines()
+    fenced = _fence_mask(lines)
+    wanted = {heading.strip().casefold() for heading in headings}
+    starts: list[int] = []
+    for index, line in enumerate(lines):
+        if fenced[index]:
+            continue
+        match = re.match(r"^##\s+(.+?)\s*$", line)
+        if match and match.group(1).strip().casefold() in wanted:
+            starts.append(index)
+    candidates: list[str] = []
+    for start in starts:
+        end = next(
+            (index for index in range(start + 1, len(lines))
+             if not fenced[index] and re.match(r"^##\s+\S", lines[index])),
+            len(lines),
+        )
+        candidates.append("\n".join(lines[start + 1:end]).strip())
+    return max(candidates, key=len) if candidates else None
+
+
+def check_critical_sections(text: str, items: list[dict], is_canonical: bool) -> list[str]:
+    """关键章节不能只剩一个子串：正典比正文哈希，本地化副本比最小长度 + 多条锚点。"""
+    missing: list[str] = []
+    for item in items:
+        ident = item.get("id", "?")
+        body = extract_section(text, item.get("headings", []))
+        if body is None:
+            missing.append(f"section:{ident}")
+            continue
+        if is_canonical and item.get("sha256"):
+            if section_hash(body) != str(item["sha256"]).lower():
+                missing.append(f"section_hash:{ident}")
+            continue
+        floor = int(item.get("min_chars", 0) or 0)
+        if floor and len(body.strip()) < floor:
+            missing.append(f"section_short:{ident}({len(body.strip())}<{floor})")
+        for anchor in item.get("anchors", []):
+            aid = anchor.get("id", "?")
+            any_of = anchor.get("any", [])
+            if any_of and not any(needle.lower() in body.lower() for needle in any_of):
+                missing.append(f"section_anchor:{ident}:{aid}")
+    return missing
+
+
 def check_declaration(text: str, decl: dict) -> list[str]:
     """声明行必须是文件末尾那条；代码围栏里的示例行不算（SKILL.md 自己就有一段示例）。"""
     prefix = decl.get("prefix", "localized:")
@@ -298,6 +350,7 @@ def main() -> int:
     notes += fm_notes
 
     missing += check_anchors(text, contract.get("must_have", []), "anchor")
+    missing += check_critical_sections(text, contract.get("critical_sections", []), is_canonical)
 
     if not (args.canonical or is_ref):
         missing += check_declaration(text, contract.get("declaration", {}))

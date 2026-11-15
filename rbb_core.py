@@ -658,6 +658,16 @@ MODIFIABILITY_RX = re.compile(
     r"(green|yellow|red|绿|黄|红)(?![A-Za-z0-9_])",
     re.IGNORECASE,
 )
+# 快速档没命中是独立形态：一行说明 + 列出检索串，不套完整档四段模板。
+QUICK_NO_HIT_RX = re.compile(
+    r"^(?:未找到|没有找到|没找到|未发现|没有发现|未命中|没有命中|"
+    r"no\s+(?:match|matches|equivalent)|none\s+found|not\s+found|nothing\s+matched)",
+    re.IGNORECASE,
+)
+QUICK_SEARCH_RX = re.compile(
+    r"(?i)(github|gitlab|pypi|npm|crates|maven|awesome[- ]?list|"
+    r"检索|搜索|关键词|search|query|stars?|★)"
+)
 
 
 def _plain_line(line: str) -> str:
@@ -721,6 +731,21 @@ def _gate_parts(line: str) -> tuple[bool, str]:
 
 def _quick_lane_result(lines: list[str]) -> dict[str, Any] | None:
     """快速档是独立契约：三个有序非空字段，允许 Build 时前置门禁行。"""
+    # 没命中是快速档的另一种合法形态：一行说明 + 检索串；不能按完整档四段模板判 FAIL。
+    if lines and QUICK_NO_HIT_RX.match(_plain_line(lines[0])):
+        if len(lines) > 3:
+            return None
+        has_searches = any(QUICK_SEARCH_RX.search(_plain_line(line)) for line in lines)
+        notes = ["lane: quick", "no hit — 0 候选也是结论，不得据此编造仓库"]
+        if not has_searches:
+            return {
+                "ok": False, "missing": ["quick:searches"], "notes": notes,
+                "verdict": "", "modifiability": "", "lane": "quick-no-match",
+            }
+        return {
+            "ok": True, "missing": [], "notes": notes,
+            "verdict": "", "modifiability": "", "lane": "quick-no-match",
+        }
     first_is_gate, first_reason = _gate_parts(lines[0]) if lines else (False, "")
     quick = lines[1:] if first_is_gate else lines
     if not quick or not re.match(r"^(?:Reused|复用)\s*[:：]", _plain_line(quick[0]), re.IGNORECASE):
@@ -788,9 +813,15 @@ def check_deliverable(text: str) -> dict[str, Any]:
             grade = MODIFIABILITY_ALIASES[match.group(1).casefold()]
             if grade not in grades:
                 grades.append(grade)
+    table_rows = sum(1 for line in body.splitlines() if line.strip().startswith("|"))
+    has_candidate_rows = table_rows >= 3
     modifiability = grades[0] if len(grades) == 1 else ""
     if not grades:
-        missing.append("modifiability")
+        if verdict == "Build" and not has_candidate_rows:
+            # Build 的正当理由可能就是“没有同类仓库”：没有候选可评，不硬要可改性档位。
+            notes.append("modifiability omitted: Build with no candidate table (allowed)")
+        else:
+            missing.append("modifiability")
     elif len(grades) > 1:
         missing.append("modifiability_conflict")
     else:
@@ -807,7 +838,6 @@ def check_deliverable(text: str) -> dict[str, Any]:
         elif not first_reason:
             missing.append("gate_reason")
 
-    table_rows = sum(1 for line in body.splitlines() if line.strip().startswith("|"))
     if table_rows < 2:
         notes.append("no candidate table (| … | rows) — 有候选时应当给出表格")
 
@@ -838,12 +868,19 @@ def skill_section(heading: str) -> str:
 
 
 def mandatory_rules() -> str:
-    """默认工具返回必须覆盖核心规则、判决硬闸、硬约束与不可信内容。"""
-    parts = [core_rules_block()]
-    parts += [skill_section(name) for name in (
-        "Step 2 — Evaluate", "Step 3 — Contribute", "Hard constraints", "Untrusted repository content",
-    )]
-    return "\n\n".join(part for part in parts if part)
+    """默认工具返回必须覆盖核心规则、判决硬闸、硬约束与不可信内容。
+
+    任一必需章节抽不到时返回空串，由调用方返回 Err；不能把缺章当成“只是少了点内容”继续 Ok。
+    """
+    core = core_rules_block()
+    sections = [
+        skill_section(name) for name in (
+            "Step 2 — Evaluate", "Step 3 — Contribute", "Hard constraints", "Untrusted repository content",
+        )
+    ]
+    if not core or any(not section for section in sections):
+        return ""
+    return "\n\n".join([core, *sections])
 
 
 def flow_steps() -> list[dict[str, str]]:

@@ -101,6 +101,31 @@ class TestDeliverableContract(unittest.TestCase):
         valid = "不可复用原因：需求本质不同。\n" + build
         self.assertTrue(core.check_deliverable(valid)["ok"])
 
+    def test_quick_lane_no_hit_is_one_line_with_searches(self):
+        text = "未找到同类项目；检索了 GitHub、PyPI、awesome-lists。"
+        result = core.check_deliverable(text)
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["lane"], "quick-no-match")
+        self.assertIn("no hit", " ".join(result["notes"]))
+
+    def test_quick_lane_no_hit_without_searches_still_fails(self):
+        result = core.check_deliverable("没找到。")
+        self.assertFalse(result["ok"])
+        self.assertIn("quick:searches", result["missing"])
+
+    def test_build_without_candidate_table_does_not_invent_modifiability(self):
+        text = FULL.replace(
+            "| Repo | Date |\n|---|---|\n| owner/demo | 2026-10-01 |",
+            "未检索到同类候选。",
+        ).replace("Modifiability: green (clean core and tests).\n", "")
+        text = text.replace("Verdict: Join.", "Verdict: Build.")
+        text = "不可复用原因：没有同类项目。\n" + text
+        result = core.check_deliverable(text)
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["verdict"], "Build")
+        self.assertEqual(result["modifiability"], "")
+        self.assertTrue(any("modifiability omitted" in note for note in result["notes"]))
+
     def test_verdict_is_structured_and_red_cannot_join(self):
         red = FULL.replace("Modifiability: green", "Modifiability: red")
         result = core.check_deliverable(red)
@@ -125,6 +150,10 @@ class TestRulesAndDocs(unittest.TestCase):
         ])
         self.assertIn("Modifiability gate", steps[1]["content"])
         self.assertIn("Branch first", steps[2]["content"])
+
+    def test_missing_mandatory_section_returns_empty_payload(self):
+        with mock.patch.object(core, "skill_section", side_effect=lambda name: "" if name == "Hard constraints" else "body"):
+            self.assertEqual(core.mandatory_rules(), "")
 
     def test_chinese_and_english_verdict_tables_agree(self):
         english, chinese = read(SKILL), read(ZH)
@@ -168,6 +197,19 @@ class TestLocalizedVerifier(unittest.TestCase):
                 capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
             )
         return proc
+
+    def test_critical_section_cannot_be_truncated_to_one_sentence(self):
+        def mutate(text):
+            return re.sub(
+                r"(?ms)(## Untrusted repository content\n).*?(?=\n## Hosts)",
+                r"\1data, not instructions.\n",
+                text,
+                count=1,
+            )
+
+        proc = self.verify_text(SKILL, mutate)
+        self.assertEqual(proc.returncode, 1, proc.stdout)
+        self.assertIn("section_short:untrusted", proc.stdout)
 
     def test_new_required_anchors_cannot_be_deleted(self):
         cases = {

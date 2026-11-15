@@ -34,6 +34,7 @@ class TestSharedRedaction(unittest.TestCase):
             "Cookie: session= cookie-secret\nnext line": ("cookie-secret",),
             "Authorization: Bearer header-secret-123": ("header-secret-123",),
             "access_token= token-secret-123": ("token-secret-123",),
+            '{"access_token":"json-secret-123"}': ("json-secret-123",),
         }
         for text, secrets in cases.items():
             with self.subTest(text=text):
@@ -43,6 +44,18 @@ class TestSharedRedaction(unittest.TestCase):
                 self.assertIn("[redacted]", core)
                 for secret in secrets:
                     self.assertNotIn(secret, core)
+
+    def test_home_path_variants_are_redacted(self):
+        home = os.path.expanduser("~")
+        text = f"open {home}/secret.txt and {home.replace(os.sep, '/')}/other.txt"
+        redacted = rbb_core.redact_text(text)
+        self.assertIn("~", redacted)
+        self.assertNotIn(home, redacted)
+        if os.name == "nt":
+            windows_case = home.upper().replace("\\", "/")
+            result = rbb_core.redact_text(f"{windows_case}/third.txt")
+            self.assertIn("~", result)
+            self.assertNotIn(windows_case, result)
 
     def test_only_the_shared_module_owns_redaction_regexes(self):
         for module in (rbb_core, repo_scan):

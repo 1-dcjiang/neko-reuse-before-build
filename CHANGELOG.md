@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.11 — 2026-11-15
+
+按《neko-reuse-before-build_增量复审_对照_172》修当前代码里的残留与新增问题：
+
+- **Build 不再被逼编可改性**：`check_deliverable` 在 `verdict=Build` 且候选表没有数据行时，允许省略可改性档位并写 note；有候选表时仍要求绿/黄/红。
+- **快速档补“没命中”形态**：首行为 `未找到 / 没找到 / No match` 等、且不超过三行时按快速档处理；必须至少提到一次检索来源，否则报 `quick:searches`，不再误落完整档四段模板。
+- **必需章节缺失即 Err**：`mandatory_rules()` 任一核心章节抽不到就返回空串，由 `rbb_rules` 返回 Err，不再静默少一块硬约束。
+- **脱敏覆盖 JSON 字段与 Windows 路径**：字段名允许带引号（`{"access_token":"…"}` 也命中），home 路径按大小写与 `/`、`\`、双反斜杠变体归一替换。
+- **关键章节不再只靠子串**：`localization.contract.json` 新增 `critical_sections`（Step 2 / Step 3 / Hard constraints / Untrusted）；英文正典比正文 SHA-256，本地化副本比最小长度 + 多锚点，保留一句再删正文会报 `section_short`。
+- **vendor 说明**：继续明确 `SHA256SUMS.txt` 是完整性清单、不是签名；下游应在 vendor 目录之外另行记录 ZIP 的 SHA-256。`attest-build-provenance` 属发布工作流可选增强，本版未改 workflow。
+- 版本升至 0.3.11；规则不变块与契约基线哈希未动。
+
 ## 0.3.10 — 2026-11-14
 
 - **下游 vendor 文档补齐**：在原 1–4 节后新增非 N.E.K.O 仓库接入、CI 校验、扩展／本地化副本三节，并补充升级复检流程；示例改用本版 tag 与 ZIP 文件名。
