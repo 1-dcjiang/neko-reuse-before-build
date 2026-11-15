@@ -141,6 +141,12 @@ class TestDeliverableContract(unittest.TestCase):
             "critical_sections_floor:step2(1<500)",
             verify.check_contract_baseline(contract),
         )
+        contract = json.loads(read(os.path.join(SKILL_DIR, "localization.contract.json")))
+        contract["critical_sections"][0]["anchors"].pop()
+        self.assertIn(
+            "critical_sections_anchors:step2",
+            verify.check_contract_baseline(contract),
+        )
 
     def test_build_without_candidate_table_does_not_invent_modifiability(self):
         text = FULL.replace(

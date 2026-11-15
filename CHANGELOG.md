@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.13 — 2026-11-15
+
+按《rbb-4a14fbd-增量复核-1114224427》收口 `0.3.12` 的文档残留与契约硬化缺口：
+
+- **vendor 文档旧版本号**：`docs/vendor.md` 第 1 节发布流程里的 `0.3.11` 改为 `0.3.13`；`test_vendor_guide_pins_neko_repository_version_and_target` 新增断言，vendor 文档不得再出现 `0.3.11`。
+- **章节锚点钉进代码**：`verify_localized.py` 新增 `CANONICAL_SECTION_ANCHORS`；只改契约删掉某节锚点、换锚点或改锚点条件，会在 `check_contract_baseline` 启动检查时被拒绝。
+- **校验器版本**：`__version__` 升至 `1.2.9`，测试同步。
+- **版本同步**：`plugin.toml`、`pyproject.toml` 与 README 当前版本升到 `0.3.13`；规则不变块与 `CANONICAL_SHA256` 未动；退出码 0/1/2 语义不变。
+- 测试 171 passed（另有 33 个子测试），Ruff 全绿。
+
 ## 0.3.12 — 2026-11-15
 
 按《rbb-bd72178-增量核对-1114191452》修 v0.3.11 留下的文档与契约同步缺口：

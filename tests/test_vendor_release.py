@@ -143,6 +143,7 @@ class TestVendorDocsAndWorkflow(unittest.TestCase):
         self.assertIn("SHA256SUMS.txt", text)
         self.assertIn("VENDOR-SHA256SUMS.txt", text)
         self.assertIn("不等于签名", text)
+        self.assertNotIn("0.3.11", text)
 
 
 if __name__ == "__main__":

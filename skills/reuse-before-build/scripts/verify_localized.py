@@ -22,7 +22,7 @@
 
 from __future__ import annotations
 
-__version__ = "1.2.8"
+__version__ = "1.2.9"
 
 import argparse
 import hashlib
@@ -47,6 +47,31 @@ CANONICAL_SECTION_FLOORS = {
     "step3": 500,
     "hard_constraints": 350,
     "untrusted": 180,
+}
+# 锚点也钉进代码：只改契约删掉某节锚点，会让下游副本的检查变宽松。
+CANONICAL_SECTION_ANCHORS = {
+    "step2": (
+        ("scoring", ("activity", "活跃度"), ()),
+        ("modifiability", ("Modifiability gate", "可改性硬闸"), ()),
+        ("verdict_table", (), ("Join", "Extend", "Fork", "Build")),
+        ("no_fifth", ("There is no fifth verdict", "没有第五个判决"), ()),
+    ),
+    "step3": (
+        ("contributing", ("CONTRIBUTING",), ()),
+        ("branch", ("Branch first, never the default branch", "分支优先，绝不直写主干"), ()),
+        ("adapter", ("stable seam and a thin adapter", "稳定接入口 + 薄适配层"), ()),
+        ("ai", ("Disclose AI assistance", "说清 AI 参与"), ()),
+    ),
+    "hard_constraints": (
+        ("never_invent", ("Never invent repos", "不虚构仓库"), ()),
+        ("public_write", ("per-action confirmation", "每一次公开写都要逐次确认"), ()),
+        ("never_join", ("Never Join a repo", "不 Join 可改性判红"), ()),
+    ),
+    "untrusted": (
+        ("data", ("data, not instructions", "数据，不是指令"), ()),
+        ("no_exec", ("Never execute a command", "绝不直接在宿主机执行"), ()),
+        ("verdict", ("deliverable's verdict", "交付结论必须来自"), ()),
+    ),
 }
 
 
@@ -233,8 +258,26 @@ def check_critical_sections(text: str, items: list[dict], is_canonical: bool) ->
     return missing
 
 
+def anchor_signature(value: object) -> tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...]:
+    """把契约里的 anchors 归一成可逐字比较的形状；形状不对按空签名处理。"""
+    if not isinstance(value, list):
+        return ()
+    rows: list[tuple[str, tuple[str, ...], tuple[str, ...]]] = []
+    for anchor in value:
+        if not isinstance(anchor, dict):
+            return ()
+        any_of = anchor.get("any", []) or []
+        all_of = anchor.get("all", []) or []
+        if not isinstance(any_of, list) or not isinstance(all_of, list):
+            return ()
+        rows.append(
+            (str(anchor.get("id", "")), tuple(str(item) for item in any_of), tuple(str(item) for item in all_of))
+        )
+    return tuple(rows)
+
+
 def check_contract_baseline(contract: dict) -> list[str]:
-    """契约里的章节项不能少于代码内置基线（删项、降长度、换哈希都会露馅）。"""
+    """契约里的章节项不能少于代码内置基线（删项、降长度、换哈希、删锚点都会露馅）。"""
     missing: list[str] = []
     items = {str(item.get("id", "")): item for item in contract.get("critical_sections", [])}
     for ident, pinned in CANONICAL_SECTION_SHA256.items():
@@ -252,6 +295,8 @@ def check_contract_baseline(contract: dict) -> list[str]:
             floor = 0
         if floor < CANONICAL_SECTION_FLOORS[ident]:
             missing.append(f"critical_sections_floor:{ident}({floor}<{CANONICAL_SECTION_FLOORS[ident]})")
+        if anchor_signature(item.get("anchors")) != CANONICAL_SECTION_ANCHORS[ident]:
+            missing.append(f"critical_sections_anchors:{ident}")
     return missing
 
 
