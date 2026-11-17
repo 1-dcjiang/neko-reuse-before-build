@@ -106,7 +106,6 @@ search_args = _gh_helpers.search_args
 normalize_search_row = _gh_helpers.normalize_search_row
 unique_keywords = _gh_helpers.unique_keywords
 GH_CREATIONFLAGS = _gh_helpers.GH_CREATIONFLAGS
-PERMISSIVE = _gh_helpers.PERMISSIVE
 AUTH_HINT = _gh_helpers.AUTH_HINT
 FAIL_HINT = _gh_helpers.FAIL_HINT
 default_since = _gh_helpers.default_since
@@ -194,11 +193,6 @@ def load_manifest_settings(plugin_toml: str = "") -> tuple[dict[str, Any], str]:
         _logger.warning("%s；回退代码内置兜底默认值", warning)
         return {}, warning
     return section, ""
-
-
-def manifest_settings(plugin_toml: str = "") -> dict[str, Any]:
-    """读 plugin.toml 里的 [settings] 作为默认值；读不到就返回空表（不抛）。"""
-    return load_manifest_settings(plugin_toml)[0]
 
 
 def _as_bool(value: Any, default: bool) -> bool:
@@ -812,11 +806,8 @@ def _looks_like_python(path: str) -> bool:
                 or base in {"py", "py.exe"})
 
 
-def resolve_python(python_exe: str = "") -> str:
+def resolve_python() -> str:
     """优先用真正的 Python 解释器；Windows 只有 py 启动器时也能找到。"""
-    raw = str(python_exe or "").strip()
-    if raw:
-        return raw
     if sys.executable and os.path.isfile(sys.executable) and _looks_like_python(sys.executable):
         return sys.executable
     for name in ("python", "python3", "py"):
@@ -827,9 +818,9 @@ def resolve_python(python_exe: str = "") -> str:
     return ""
 
 
-def canonical_hash(python_exe: str = "", timeout: float = 30) -> tuple[str, str]:
+def canonical_hash(timeout: float = 30) -> tuple[str, str]:
     """跑随包校验器 --print-hash，返回 (hash, 错误信息)。"""
-    py = resolve_python(python_exe)
+    py = resolve_python()
     try:
         proc = subprocess.run(
             [py, "-X", "utf8", VERIFY_SCRIPT, "--print-hash", SKILL_MD],
@@ -870,7 +861,7 @@ def resolve_localized_path(target: str) -> tuple[str, str]:
     return real, ""
 
 
-def verify_localized(target: str, python_exe: str = "",
+def verify_localized(target: str,
                      extra: list[str] | None = None, timeout: float = 30) -> dict[str, Any]:
     """校验一份本地化副本；rc=0 才算保住规则。路径、参数与输出都做收敛。
 
@@ -880,7 +871,7 @@ def verify_localized(target: str, python_exe: str = "",
     if path_err:
         return {"rc": 2, "out": "", "err": path_err[:400]}
     safe_extra = [arg for arg in (extra or []) if arg == "--quiet"]
-    py = resolve_python(python_exe)
+    py = resolve_python()
     args = [py, "-X", "utf8", VERIFY_SCRIPT, real, *safe_extra]
     try:
         proc = subprocess.run(
