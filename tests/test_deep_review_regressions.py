@@ -151,7 +151,7 @@ class TestDeliverableContract(unittest.TestCase):
         )
         contract = json.loads(read(os.path.join(SKILL_DIR, "localization.contract.json")))
         contract["rules_min"] = 1
-        self.assertIn("rules_min:1!=5", verify.check_contract_baseline(contract))
+        self.assertIn("rules_min:1!=6", verify.check_contract_baseline(contract))
         contract = json.loads(read(os.path.join(SKILL_DIR, "localization.contract.json")))
         contract["must_have"].pop()
         self.assertIn("must_have_ids", verify.check_contract_baseline(contract))

@@ -169,7 +169,7 @@ class TestSingleVersions(unittest.TestCase):
             and any(isinstance(target, ast.Name) and target.id == "__version__" for target in node.targets)
             and isinstance(node.value, ast.Constant)
         ]
-        self.assertEqual(versions, ["1.2.15"])
+        self.assertEqual(versions, ["1.2.16"])
 
     def test_repo_scan_patch_version_tracks_behavior_change(self):
         self.assertEqual(repo_scan.__version__, "1.2.9")
