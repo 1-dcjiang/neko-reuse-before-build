@@ -267,7 +267,7 @@ class TestVerifier(unittest.TestCase):
         self.assertIn("invariants_hash", p.stdout)
 
     def test_localized_copy_with_declaration_passes(self):
-        line = ("\nlocalized: host=test-host | kept=five rules, gate, verdict order, "
+        line = ("\nlocalized: host=test-host | kept=six rules, gate, verdict order, "
                 "four-part deliverable, hard constraints | changed=none | unsupported=none\n")
         p = self.verify(self._copy_with(self.SKILL, append=line))
         self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
@@ -314,6 +314,16 @@ class TestVerifier(unittest.TestCase):
         p = self.verify(self._copy_with(self.ZH, mutate, self.DECL))
         self.assertEqual(p.returncode, 1)
         self.assertIn("rule:rule_4", p.stdout)
+
+    def test_deleting_the_foundation_rule_fails_in_translated_mode(self):
+        def mutate(text):
+            return "\n".join(line for line in text.splitlines()
+                             if "先判断能不能做出更好的底层" not in line)
+
+        p = self.verify(self._copy_with(self.ZH, mutate, self.DECL))
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("rules_count", p.stdout)
+        self.assertIn("rule:rule_6", p.stdout)
 
     def test_canonical_is_refused_outside_the_package(self):
         p = self.verify(self._copy_with(self.SKILL, append=self.DECL), "--canonical")
@@ -389,6 +399,16 @@ class TestDocs(unittest.TestCase):
         zh = self.read("references", "zh-guide.md")
         self.assertIn("不 Join 可改性判红的仓库", zh)
         self.assertIn("不让业务代码 import 上游内部路径", zh)
+
+    def test_foundation_check_is_in_both_editions_and_contract(self):
+        skill = self.read("SKILL.md")
+        self.assertIn("Foundation check before you Join", skill)
+        zh = self.read("references", "zh-guide.md")
+        self.assertIn("先判断能不能做出更好的底层", zh)
+        with open(os.path.join(ROOT, "localization.contract.json"), encoding="utf-8") as fh:
+            contract = json.load(fh)
+        self.assertEqual(contract["rules_min"], 6)
+        self.assertIn("rule_6", {item["id"] for item in contract["rule_anchors"]})
 
 
 class TestPromptDigests(unittest.TestCase):

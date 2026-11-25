@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.23 — 2026-11-25
+
+同步上游 `reuse-before-build` v1.2.16 的第 6 条核心规则「先判断能不能做出更好的底层」，并让随包契约与校验器识别它。
+
+- **规则本体**：`SKILL.md` 与 `references/zh-guide.md` 在 `RBB:INVARIANTS` 块里新增第 6 条 `Foundation check before you Join`。Join 前先判断候选的核心层能否实质改进：上层缺功能就补上游；绿档可把底层改进提上游 PR；黄档只隔稳定接入口 Extend、不碰内核；红档不 Join。该条只细化判决，不替代六维打分与判定表。
+- **契约**：`localization.contract.json` 升到 `version: 5`，`rules_min` 从 5 改为 6，新增 `rule_6` 锚点；`block.canonical_sha256` 重算为 `144decb2…`。
+- **校验器**：`verify_localized.py` 升 `1.2.16`，内置正典哈希、`CANONICAL_RULES_MIN` 与 `CANONICAL_RULE_ANCHOR_IDS` 同步到 6 条；关键章节哈希不变。
+- **提示词**：中英精简提示词补入第 6 条并顺延编号，`prompt-digests.json` 用 `--emit --version p3 --released v0.3.23` 重新生成。
+- **版本**：插件升 `0.3.23`；`verify_localized.py` 升 `1.2.16`；skill frontmatter 升 `1.2.16`。
+- 测试：随包 `test_skill_pack.py`、离线与运行时回归、Ruff 与静态检查。
+
 ## 0.3.22 — 2026-11-17
 
 把 0.3.21 标记的三项「计划废弃」公开面正式删除。0.3.21 写明「本次不删，核实无外部依赖后再删」，本轮核实完毕，改动单列在这里。

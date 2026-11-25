@@ -361,7 +361,7 @@ class ReuseBeforeBuildPlugin(NekoPluginBase):
     @llm_tool(
         name="rbb_verify",
         description=(
-            "校验一份「本地化副本」是否保住了不可变规则：不变块哈希（逐字）或规则条数 1..5 + 每条规则锚点（翻译版），"
+            "校验一份「本地化副本」是否保住了不可变规则：不变块哈希（逐字）或规则条数 1..6 + 每条规则锚点（翻译版），"
             "外加声明行 `localized: host=… | kept=… | changed=… | unsupported=…`。"
             "何时用：把本 skill 改写成别的宿主格式（单文件系统提示、别的 frontmatter、别的语言）之后必须跑一次。"
             "前置：待校验文件存在且是绝对路径或相对插件目录可解析的路径。"

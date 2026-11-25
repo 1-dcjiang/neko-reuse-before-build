@@ -4,7 +4,7 @@
 五道闸：
   1. 不变块（<!-- RBB:INVARIANTS --> 之间）——逐字版比哈希，翻译版比规则条数与逐条锚点；
   2. 规则完整性——块内编号必须正好 1..N（N≥rules_min），删条、改号都会露馅；
-  3. 语义锚点（localization.contract.json 的 must_have）——中英任一写法均算命中；
+  3. 语义锚点（localization.contract.json 的 must_have 与 rule_anchors）——中英任一写法均算命中；
   4. 关键章节——正典比正文 SHA-256，本地化副本比最小长度与章节内锚点；
   5. 声明行——`localized: host=... | kept=... | changed=... | unsupported=...`。
 
@@ -22,7 +22,7 @@
 
 from __future__ import annotations
 
-__version__ = "1.2.15"
+__version__ = "1.2.16"
 
 import argparse
 import hashlib
@@ -34,7 +34,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_CONTRACT = os.path.join(os.path.dirname(HERE), "localization.contract.json")
 # 随包英文正典的基线钉在代码里，不能只相信同目录、同样可被改写的契约。
-CANONICAL_SHA256 = "fa0f991fbfd236d860a2c401aff6f104f994e97d2b1fa100c23eee9d046fbc93"
+CANONICAL_SHA256 = "144decb225dc457571cceb3bdf77b3d5bf3b55a738ef8704826cefe8ffa2c0c9"
 # 关键章节的正文哈希同样钉在代码里：只改契约删掉 critical_sections 不能放行。
 CANONICAL_SECTION_SHA256 = {
     "step2": "031a0a7cbff5c5f3b500c46a12d35e83036ff4109b5c1d041abbdb30623613a4",
@@ -73,8 +73,8 @@ CANONICAL_SECTION_ANCHORS = {
         ("verdict", ("deliverable's verdict", "交付结论必须来自"), ()),
     ),
 }
-CANONICAL_RULES_MIN = 5
-CANONICAL_RULE_ANCHOR_IDS = frozenset({"rule_1", "rule_2", "rule_3", "rule_4", "rule_5"})
+CANONICAL_RULES_MIN = 6
+CANONICAL_RULE_ANCHOR_IDS = frozenset({"rule_1", "rule_2", "rule_3", "rule_4", "rule_5", "rule_6"})
 CANONICAL_MUST_HAVE_IDS = frozenset({
     "gate", "verdict_order", "deliverable", "contributing_rule", "public_write_gate",
     "quick_lane", "untrusted_repository_content", "modifiability_green_only",

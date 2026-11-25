@@ -1,6 +1,6 @@
 ---
 name: reuse-before-build
-version: 1.2.7
+version: 1.2.16
 license: MIT
 description: 用户说“帮我写一个…工具/脚本/插件/服务”“做一个和 X 一样的程序”“有没有现成的开源项目”“从零实现一个”，或说 upstream this fix、提 PR 时使用：先检索 GitHub 与包生态里已有同用途实现，按活跃度、许可、贡献友好度评估，优先加入该仓库当公共贡献者，而不是新建更差的重复品。只有要私有/闭源代码、许可禁止再分发时才跳过。Before writing any new program, script, library, plugin or service, search GitHub for an existing implementation and contribute upstream instead of shipping a duplicate, e.g. “build me a tool”, “write a script that…”, “is there an existing project for this”, “implement X from scratch”, “open a PR”.
 ---
@@ -21,6 +21,7 @@ Rules, not a tool. Works in any host that can read files (Claude Skills, AGENTS.
 4. **Contribution must be genuinely useful.** No typo, formatting or untested-duplicate PRs. Those get closed and tag the account as a spammer.
 5. **Code gate: candidates and a first concrete action come before scaffolding.** Do not output a full new-project scaffold before you have listed 3–6 candidates and the first executable contribution action (draft issue text or PR plan).
    If a matching repo exists and you still choose to build new, the first line of the reply must be `不可复用原因 / Not reusable because: <license | direction | maintenance | requirement mismatch>`.
+6. **Foundation check before you Join.** Before committing to a candidate, ask whether its core layer can be materially improved. If the gap is only upstairs, contribute the feature upstream. If the foundation itself blocks the direction, a green repo means upstream the core improvement as a PR (a separate small refactor PR when useful); a yellow repo means do not touch the core — Extend behind the stable seam, and let the verdict table decide between Fork and Build if the seam cannot carry the requirement; a red repo is never Join. This check refines the verdict, not replaces it: the six-dimension score and the verdict table still decide Join/Extend/Fork/Build. “I can build a better foundation” is not a reason to duplicate a healthy upstream.
 <!-- RBB:INVARIANTS:END -->
 
 ## Two lanes
@@ -162,7 +163,7 @@ A host may expect a different shape than this file ships in — another frontmat
 `<!-- RBB:INVARIANTS:LANG: <code> -->` as its first inner line (hash will not match →
 `translated` mode, judged on the semantic anchors instead). Never renumber, merge or drop a rule.
 
-- The five core rules, including the code gate and the `不可复用原因 / Not reusable because:` line.
+- The six core rules, including the code gate, the foundation check, and the `不可复用原因 / Not reusable because:` line.
 - Verdict order: Join → Extend → Fork → Build; Build only with a stated reason.
 - The four-part deliverable (found / why / what I will add / alternatives and risks).
 - The quick-lane three-line form (`Reused` / `Change` / `Risk`) whenever the quick lane is used.

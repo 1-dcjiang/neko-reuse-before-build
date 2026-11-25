@@ -108,9 +108,9 @@ class TestBundledSkill(unittest.TestCase):
         norm = "\n".join(line.rstrip() for line in block.strip().splitlines())
         self.assertEqual(hashlib.sha256(norm.encode("utf-8")).hexdigest(), want)
 
-    def test_rules_have_five_numbered_items(self):
+    def test_rules_have_six_numbered_items(self):
         nums = [int(n) for n in re.findall(r"^(\d+)\.\s", rbb_core.core_rules_block(), re.M)]
-        self.assertEqual(nums, [1, 2, 3, 4, 5])
+        self.assertEqual(nums, [1, 2, 3, 4, 5, 6])
 
     def test_verifier_passes_on_bundled_copy(self):
         p = subprocess.run(
@@ -119,7 +119,7 @@ class TestBundledSkill(unittest.TestCase):
         )
         self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
         self.assertIn("verbatim", p.stdout)
-        self.assertIn("rules=[1, 2, 3, 4, 5]/5", p.stdout)
+        self.assertIn("rules=[1, 2, 3, 4, 5, 6]/6", p.stdout)
 
     def test_verifier_rejects_deleted_rule(self):
         with open(SKILL_MD, encoding="utf-8") as fh:
